@@ -410,27 +410,26 @@ def generate_voiceover(script, voice_id="default", output_path=None, use_elevenl
     # Try multiple TTS services in order of preference
     services = []
     
-    # 1. Coqui XTTS (high-quality, free)
-    services.append(("Coqui XTTS", lambda: generate_voiceover_coqui_xtts(script, str(output_path), voice_id)))
-    
-    # 2. Coqui TTS (simple model - faster)
-    services.append(("Coqui TTS (simple)", lambda: generate_voiceover_coqui_simple(script, str(output_path), voice_id)))
-    
-    # 3. ElevenLabs (if requested and available)
+    # 1. ElevenLabs (if requested and available) - PRIORITY 1
     if use_elevenlabs:
         services.append(("ElevenLabs", lambda: generate_voiceover_elevenlabs(script, voice_id, str(output_path))))
     
-    # 4. Hugging Face TTS (free)
+    # 2. Hugging Face TTS (free) - PRIORITY 2
     services.append(("Hugging Face TTS", lambda: generate_voiceover_huggingface_tts(script, str(output_path), voice_id)))
     
-    # 5. Azure TTS (free tier)
+    # 3. Azure TTS (free tier) - PRIORITY 3
     services.append(("Azure TTS", lambda: generate_voiceover_azure_tts(script, str(output_path), voice_id)))
     
-    # 6. Google TTS (free tier)
+    # 4. Google TTS (free tier) - PRIORITY 4
     services.append(("Google TTS", lambda: generate_voiceover_google_tts(script, str(output_path), voice_id)))
     
-    # 7. Local TTS (slow but reliable)
+    # 5. Local TTS (slow but reliable) - PRIORITY 5
     services.append(("Local TTS", lambda: generate_voiceover_local(script, str(output_path), voice_id)))
+    
+    # 6. Coqui XTTS (high-quality, free) - Only if properly installed
+    if COQUI_AVAILABLE:
+        services.append(("Coqui XTTS", lambda: generate_voiceover_coqui_xtts(script, str(output_path), voice_id)))
+        services.append(("Coqui TTS (simple)", lambda: generate_voiceover_coqui_simple(script, str(output_path), voice_id)))
     
     # Try each service
     for service_name, service_func in services:

@@ -16,7 +16,7 @@ load_dotenv()
 from utils.script_generation import generate_script
 from utils.sanitization import sanitize_script, split_script_into_segments
 from utils.voiceover import generate_voiceover, get_available_voices, estimate_voiceover_duration
-from utils.image_generation import generate_images_for_script, generate_image_free, analyze_script_for_scenes
+from utils.image_generation import generate_images_for_script, generate_images_huggingface_only, generate_image_free, analyze_script_for_scenes
 from utils.image_prompting import generate_image_prompts
 
 # Page configuration
@@ -141,7 +141,7 @@ def voiceover_generation():
     # Display script
     st.text_area("Script:", value=st.session_state.sanitized_script, height=200, disabled=True)
     
-    # Voice sample management
+    # Voice sample management for Coqui TTS
     st.markdown("### 🎯 Voice Sample Setup")
     voice_sample_path = "voice_sample.wav"
     
@@ -153,7 +153,7 @@ def voiceover_generation():
         # Play voice sample
         st.audio(voice_sample_path)
     else:
-        st.warning("⚠️ No voice sample found. XTTS voice cloning requires a voice sample.")
+        st.warning("⚠️ No voice sample found. Coqui TTS voice cloning requires a voice sample.")
         st.info("💡 Upload an audio file to create your voice sample:")
         
         uploaded_file = st.file_uploader("Upload Voice Sample", type=['wav', 'mp3', 'm4a', 'aac'])
@@ -164,39 +164,8 @@ def voiceover_generation():
             st.success(f"✅ Voice sample saved: {voice_sample_path}")
             st.rerun()
     
-    # Service selection
-    service_options = ["Coqui XTTS (Voice Clone)", "Coqui XTTS (High Quality)", "Coqui TTS (simple)", "ElevenLabs", "Hugging Face TTS", "Azure TTS", "Google TTS", "Local TTS"]
-    selected_service = st.selectbox("TTS Service:", service_options, index=0)
-    voices = get_available_voices()
-    if selected_service == "Coqui XTTS (Voice Clone)":
-        voice_options = ["Your Voice Clone"]
-        service_info = "🎯 HIGH-QUALITY VOICE CLONING - Uses your voice sample for realistic speech!"
-    elif selected_service == "Coqui XTTS (High Quality)":
-        voice_options = ["High Quality XTTS"]
-        service_info = "🎯 HIGH-QUALITY & FREE - Best AI voice generation available!"
-    elif selected_service == "Coqui TTS (simple)":
-        voice_options = list(voices.get("coqui", {}).keys())
-        service_info = "⚡ FAST & FREE - Quick generation with good quality"
-    elif selected_service == "ElevenLabs":
-        voice_options = list(voices.get("elevenlabs", {}).keys())
-        service_info = "High-quality AI voices (requires API key)"
-    elif selected_service == "Hugging Face TTS":
-        voice_options = list(voices.get("huggingface", {}).keys())
-        service_info = "🤗 FREE & FAST - No API key required!"
-    elif selected_service == "Azure TTS":
-        voice_options = list(voices.get("azure", {}).keys())
-        service_info = "Microsoft Neural voices (free tier available)"
-    elif selected_service == "Google TTS":
-        voice_options = list(voices.get("google", {}).keys())
-        service_info = "Google Cloud TTS (free tier available)"
-    elif selected_service == "Local TTS":
-        voice_options = voices.get("local", [])
-        service_info = "System voices (slow but reliable)"
-    else:
-        voice_options = []
-        service_info = ""
-    selected_voice = st.selectbox("Voice:", voice_options if voice_options else ["Default"])
-    st.info(service_info)
+    # Simplified voiceover - just use Coqui TTS
+    st.info("🎤 Using Coqui TTS for voice cloning with your voice sample")
     output_filename = st.text_input("Output Filename:", value="voiceover.wav")
     words = len(st.session_state.sanitized_script.split())
     estimated_duration = estimate_voiceover_duration(st.session_state.sanitized_script)
@@ -207,9 +176,8 @@ def voiceover_generation():
             # Ensure output directory exists
             os.makedirs("output/voiceovers", exist_ok=True)
             
-            # Handle different service types
-            if selected_service == "Coqui XTTS (Voice Clone)":
-                # Use XTTS with voice cloning
+            # Simplified voiceover generation - just use Coqui TTS
+            try:
                 from utils.xtts_voice_generator import XTTSVoiceGenerator
                 generator = XTTSVoiceGenerator("voice_sample.wav")
                 
@@ -221,34 +189,10 @@ def voiceover_generation():
                     st.session_state.sanitized_script,
                     f"output/voiceovers/{output_filename}"
                 )
-            elif selected_service == "Coqui XTTS (High Quality)":
-                # Use XTTS with high quality
-                from utils.xtts_voice_generator import XTTSVoiceGenerator
-                generator = XTTSVoiceGenerator("voice_sample.wav")
-                
-                # Ensure .wav extension for XTTS
-                if not output_filename.endswith('.wav'):
-                    output_filename = output_filename.replace('.mp3', '.wav').replace('.m4a', '.wav')
-                
-                output_path = generator.generate_voiceover(
-                    st.session_state.sanitized_script,
-                    f"output/voiceovers/{output_filename}"
-                )
-            else:
-                # Use other services
-                voice_id = selected_voice
-                if selected_service == "ElevenLabs":
-                    voice_id = voices.get("elevenlabs", {}).get(selected_voice, selected_voice)
-                elif selected_service == "Azure TTS":
-                    voice_id = voices.get("azure", {}).get(selected_voice, selected_voice)
-                elif selected_service == "Google TTS":
-                    voice_id = voices.get("google", {}).get(selected_voice, selected_voice)
-                output_path = generate_voiceover(
-                    script=st.session_state.sanitized_script,
-                    voice_id=voice_id,
-                    output_path=f"output/voiceovers/{output_filename}",
-                    use_elevenlabs=(selected_service == "ElevenLabs")
-                )
+            except Exception as e:
+                st.error(f"❌ Coqui TTS not available: {e}")
+                st.info("💡 Please make sure Coqui TTS is properly installed in your conda environment.")
+                output_path = None
             if output_path:
                 st.session_state.voiceover_path = output_path
                 st.success("✅ Voiceover generated successfully!")
@@ -273,23 +217,16 @@ def image_generation():
         st.warning("⚠️ No script available. Please generate a script first!")
         return
     st.text_area("Script:", value=st.session_state.sanitized_script, height=200, disabled=True)
-    service_options = ["Leonardo AI", "Hugging Face", "Stability AI", "Mock Images"]
-    selected_service = st.selectbox("Image Service:", service_options, index=0)
-    style_options = [
-        "Realistic", "Artistic", "Cartoon", "Photographic", 
-        "Cinematic", "Minimalist", "Vintage", "Modern"
-    ]
-    selected_style = st.selectbox("Style:", style_options)
+    st.info("🖼️ Using Hugging Face for high-quality image generation")
     num_images = st.slider("Number of Images:", 1, 10, 3)
-    image_size = st.selectbox("Image Size:", ["1024x1024", "1024x768", "768x1024", "512x512"])
-    quality = st.slider("Quality:", 1, 10, 7)
     if st.button("🎨 Generate Images", type="primary"):
         with st.spinner("🎨 Generating images..."):
             # Create output directory
             os.makedirs("output/images", exist_ok=True)
             
-            # Generate images for the script
-            generated_image_paths = generate_images_for_script(
+            # Simplified image generation - just use Hugging Face
+            st.info("🤗 Using Hugging Face (FREE) for image generation...")
+            generated_image_paths = generate_images_huggingface_only(
                 script=st.session_state.sanitized_script,
                 output_dir="output/images"
             )

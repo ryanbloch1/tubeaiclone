@@ -132,8 +132,8 @@ def generate_image_huggingface(prompt: str, output_path: str, api_key: Optional[
     if not api_key:
         api_key = os.getenv('HUGGINGFACE_API_KEY')
     
-    # Use a free model that doesn't require API key
-    model_id = "stabilityai/stable-diffusion-2-1"
+    # Use FLUX.1-dev model for better quality images
+    model_id = "black-forest-labs/FLUX.1-dev"
     
     # Hugging Face Inference API endpoint
     url = f"https://api-inference.huggingface.co/models/{model_id}"
@@ -165,6 +165,10 @@ def generate_image_huggingface(prompt: str, output_path: str, api_key: Optional[
             return True
         else:
             print(f"Hugging Face API error: {response.status_code} - {response.text}")
+            if response.status_code == 401:
+                print("⚠️  Hugging Face requires authentication. Try getting a free API key at https://huggingface.co/settings/tokens")
+            elif response.status_code == 503:
+                print("⚠️  Model is loading. Please wait a moment and try again.")
             return False
             
     except Exception as e:
@@ -370,6 +374,50 @@ def generate_images_for_script(script: str, output_dir: str = "output/images") -
             print(f"✅ Scene {scene['scene_number']} image generated successfully")
         else:
             print(f"❌ Failed to generate image for scene {scene['scene_number']}")
+    
+    return generated_images
+
+def generate_images_huggingface_only(script: str, output_dir: str = "output/images") -> List[str]:
+    """
+    Generate images for all scenes in a script using ONLY Hugging Face (free).
+    Args:
+        script (str): The script to generate images for.
+        output_dir (str): Directory to save images.
+    Returns:
+        List[str]: List of paths to generated images.
+    """
+    # Create output directory
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+    
+    # Analyze script for scenes
+    scenes = analyze_script_for_scenes(script)
+    
+    if not scenes:
+        print("No scenes found in script")
+        return []
+    
+    generated_images = []
+    
+    for i, scene in enumerate(scenes):
+        print(f"\nProcessing scene {scene['scene_number']} with Hugging Face...")
+        
+        # Generate prompt for this scene
+        prompt = generate_image_prompt(scene["text"], scene["scene_number"])
+        print(f"Generated prompt: {prompt}")
+        
+        # Generate image using Hugging Face only
+        timestamp = int(time.time())
+        image_filename = f"scene_{scene['scene_number']:02d}_{timestamp}.png"
+        image_path = output_path / image_filename
+        
+        success = generate_image_huggingface(prompt, str(image_path))
+        
+        if success:
+            generated_images.append(str(image_path))
+            print(f"✅ Scene {scene['scene_number']} image generated successfully with Hugging Face")
+        else:
+            print(f"❌ Failed to generate image for scene {scene['scene_number']} with Hugging Face")
     
     return generated_images
 
