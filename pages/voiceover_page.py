@@ -1,8 +1,12 @@
 import tkinter as tk
-from tkinter import ttk, font, scrolledtext, messagebox
+from tkinter import ttk, font, scrolledtext, messagebox, filedialog
 from utils.voiceover import generate_voiceover, get_available_voices, estimate_voiceover_duration
 import os
 from pathlib import Path
+from playsound import playsound
+import sounddevice as sd
+from scipy.io.wavfile import write
+import threading
 
 class VoiceoverPage(tk.Frame):
     def __init__(self, parent, controller):
@@ -86,6 +90,14 @@ class VoiceoverPage(tk.Frame):
                                    font=self.text_font, state="readonly")
         engine_combo.grid(row=1, column=1, sticky="ew", padx=(10,0), pady=5)
 
+        # Voice sample controls for XTTS
+        sample_frame = tk.Frame(settings_frame, bg="#f8f9fa")
+        sample_frame.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(10,0))
+        self.sample_label = tk.Label(sample_frame, text="Current sample: voice_sample.wav", font=("Helvetica", 10), bg="#f8f9fa", fg="#555")
+        self.sample_label.pack(side="left", padx=(0,10))
+        tk.Button(sample_frame, text="Record Sample", font=("Helvetica", 10), command=self.record_sample).pack(side="left", padx=(0,5))
+        tk.Button(sample_frame, text="Select Sample", font=("Helvetica", 10), command=self.select_sample).pack(side="left")
+
         # Script preview
         script_label = tk.Label(left_panel, text="Script Preview:", font=self.text_font, bg="#fff")
         script_label.grid(row=1, column=0, sticky="w", pady=(0,5))
@@ -144,6 +156,10 @@ class VoiceoverPage(tk.Frame):
                                   font=self.text_font, bg="#fff", fg="#666")
         self.audio_label.pack()
 
+        # Play button (initially disabled)
+        self.play_btn = tk.Button(audio_frame, text="Play Voiceover", font=self.text_font, bg="#00b894", fg="#fff", bd=0, padx=15, pady=5, state="disabled", command=self.play_voiceover)
+        self.play_btn.pack(pady=(10,0))
+
     def set_script(self, script):
         """Set the script content and update the display"""
         self.script = script
@@ -190,15 +206,18 @@ class VoiceoverPage(tk.Frame):
                 self.voiceover_path = voiceover_path
                 self.audio_label.config(text=f"✅ Voiceover generated!\nSaved to: {os.path.basename(voiceover_path)}")
                 self.status_text.config(text="Voiceover generation completed!")
+                self.play_btn.config(state="normal")
                 messagebox.showinfo("Success", f"Voiceover generated successfully!\nSaved to: {voiceover_path}")
             else:
                 self.audio_label.config(text="❌ Voiceover generation failed")
                 self.status_text.config(text="Generation failed")
+                self.play_btn.config(state="disabled")
                 messagebox.showerror("Error", "Failed to generate voiceover. Please check your settings.")
                 
         except Exception as e:
             self.audio_label.config(text="❌ Voiceover generation failed")
             self.status_text.config(text="Generation failed")
+            self.play_btn.config(state="disabled")
             messagebox.showerror("Error", f"Failed to generate voiceover: {e}")
         finally:
             self.generate_btn.config(state="normal", text="Generate Voiceover")
@@ -214,3 +233,45 @@ class VoiceoverPage(tk.Frame):
         image_page = self.controller.frames["ImageGenerationPage"]
         image_page.set_script(self.script)
         self.controller.show_frame("ImageGenerationPage") 
+
+    def play_voiceover(self):
+        """Play the generated voiceover audio file"""
+        if self.voiceover_path and os.path.exists(self.voiceover_path):
+            try:
+                playsound(self.voiceover_path)
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to play audio: {e}")
+        else:
+            messagebox.showwarning("Warning", "No voiceover audio file found!") 
+
+    def record_sample(self):
+        """Record a new voice sample using the microphone and save as voice_sample.wav"""
+        def do_record():
+            fs = 22050  # Sample rate
+            seconds = 5  # Duration
+            self.status_text.config(text="Recording... Speak now!")
+            self.update()
+            try:
+                audio = sd.rec(int(seconds * fs), samplerate=fs, channels=1, dtype='int16')
+                sd.wait()
+                write('voice_sample.wav', fs, audio)
+                self.sample_label.config(text="Current sample: voice_sample.wav")
+                self.status_text.config(text="Recording complete!")
+                messagebox.showinfo("Success", "Voice sample recorded and saved as voice_sample.wav")
+            except Exception as e:
+                self.status_text.config(text="Recording failed")
+                messagebox.showerror("Error", f"Failed to record sample: {e}")
+            self.status_text.config(text="Ready to generate voiceover")
+        threading.Thread(target=do_record).start()
+
+    def select_sample(self):
+        """Select an existing WAV file as the voice sample for XTTS"""
+        file_path = filedialog.askopenfilename(filetypes=[("WAV files", "*.wav")])
+        if file_path:
+            try:
+                import shutil
+                shutil.copy(file_path, 'voice_sample.wav')
+                self.sample_label.config(text="Current sample: voice_sample.wav")
+                messagebox.showinfo("Success", f"Voice sample set to: {file_path}")
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to set sample: {e}") 

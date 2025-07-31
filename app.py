@@ -164,35 +164,76 @@ def voiceover_generation():
             st.success(f"✅ Voice sample saved: {voice_sample_path}")
             st.rerun()
     
-    # Simplified voiceover - just use Coqui TTS
+    # Voiceover options
+    st.markdown("### 🎤 Voiceover Options")
+    
+    # Add a fast mode option
+    use_fast_mode = st.checkbox("🚀 Fast Mode (shorter script for testing)", value=False)
+    
+    if use_fast_mode:
+        # Create a shorter version for testing
+        short_script = " ".join(st.session_state.sanitized_script.split()[:20]) + "..."
+        st.info(f"📝 Using short script for testing: {len(short_script.split())} words")
+        script_to_use = short_script
+    else:
+        script_to_use = st.session_state.sanitized_script
+    
     st.info("🎤 Using Coqui TTS for voice cloning with your voice sample")
     output_filename = st.text_input("Output Filename:", value="voiceover.wav")
-    words = len(st.session_state.sanitized_script.split())
-    estimated_duration = estimate_voiceover_duration(st.session_state.sanitized_script)
+    words = len(script_to_use.split())
+    estimated_duration = estimate_voiceover_duration(script_to_use)
     st.metric("Words", words)
     st.metric("Estimated Duration", f"{estimated_duration:.1f}s")
+    
+    # Performance tips
+    st.markdown("### 💡 Performance Tips")
+    st.info("""
+    - **First generation** takes longer (model loading)
+    - **Subsequent generations** are faster
+    - **Shorter scripts** generate faster
+    - **Use Fast Mode** for testing with shorter text
+    """)
     if st.button("🎤 Generate Voiceover", type="primary"):
-        with st.spinner("🎵 Generating voiceover..."):
-            # Ensure output directory exists
-            os.makedirs("output/voiceovers", exist_ok=True)
+        # Ensure output directory exists
+        os.makedirs("output/voiceovers", exist_ok=True)
+        
+        # Show progress and estimated time
+        words = len(script_to_use.split())
+        estimated_time = words / 10  # Rough estimate: 10 words per second
+        st.info(f"⏱️ Estimated time: {estimated_time:.1f} seconds for {words} words")
+        
+        # Create progress bar
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        
+        # Simplified voiceover generation - just use Coqui TTS
+        try:
+            from utils.xtts_voice_generator import XTTSVoiceGenerator
+            generator = XTTSVoiceGenerator("voice_sample.wav")
             
-            # Simplified voiceover generation - just use Coqui TTS
-            try:
-                from utils.xtts_voice_generator import XTTSVoiceGenerator
-                generator = XTTSVoiceGenerator("voice_sample.wav")
-                
-                # Ensure .wav extension for XTTS
-                if not output_filename.endswith('.wav'):
-                    output_filename = output_filename.replace('.mp3', '.wav').replace('.m4a', '.wav')
-                
-                output_path = generator.generate_voiceover(
-                    st.session_state.sanitized_script,
-                    f"output/voiceovers/{output_filename}"
-                )
-            except Exception as e:
-                st.error(f"❌ Coqui TTS not available: {e}")
-                st.info("💡 Please make sure Coqui TTS is properly installed in your conda environment.")
-                output_path = None
+            # Ensure .wav extension for XTTS
+            if not output_filename.endswith('.wav'):
+                output_filename = output_filename.replace('.mp3', '.wav').replace('.m4a', '.wav')
+            
+            # Update progress during generation
+            status_text.text("🤖 Loading XTTS model...")
+            progress_bar.progress(10)
+            
+            status_text.text("🎤 Generating voiceover...")
+            progress_bar.progress(30)
+            
+            output_path = generator.generate_voiceover(
+                script_to_use,
+                f"output/voiceovers/{output_filename}"
+            )
+            
+            progress_bar.progress(100)
+            status_text.text("✅ Voiceover complete!")
+            
+        except Exception as e:
+            st.error(f"❌ Coqui TTS not available: {e}")
+            st.info("💡 Please make sure Coqui TTS is properly installed in your conda environment.")
+            output_path = None
             if output_path:
                 st.session_state.voiceover_path = output_path
                 st.success("✅ Voiceover generated successfully!")
@@ -299,6 +340,86 @@ def video_assembly():
             mime="application/zip"
         )
 
+# --- Standalone Voiceover Generation Page ---
+def standalone_voiceover_page():
+    st.markdown('<h2 class="sub-header">🔊 Standalone Voiceover Generation</h2>', unsafe_allow_html=True)
+    st.info("This page lets you record or upload your own voice sample, or use a default sample, and generate a voiceover using only Coqui XTTS (no ElevenLabs).")
+
+    # Voice sample management
+    voice_sample_path = "voice_sample.wav"
+    default_sample_path = "default_voice_sample.wav"
+    sample_to_use = None
+
+    # Provide a default sample if none exists
+    if not os.path.exists(voice_sample_path):
+        if os.path.exists(default_sample_path):
+            sample_to_use = default_sample_path
+        else:
+            # Create a dummy default sample if not present
+            import numpy as np
+            from scipy.io.wavfile import write as wavwrite
+            fs = 22050
+            seconds = 2
+            t = np.linspace(0, seconds, int(fs*seconds), False)
+            tone = (0.5 * np.sin(2 * np.pi * 220 * t)).astype(np.float32)
+            wavwrite(default_sample_path, fs, (tone * 32767).astype(np.int16))
+            sample_to_use = default_sample_path
+    else:
+        sample_to_use = voice_sample_path
+
+    st.markdown("### 🎙️ Voice Sample")
+    st.info(f"Current sample: {os.path.basename(sample_to_use)}")
+    st.audio(sample_to_use)
+
+    # Record sample (browser-based, Streamlit limitation)
+    audio_bytes = st.audio_recorder("Record a new voice sample (5s max)") if hasattr(st, 'audio_recorder') else None
+    if audio_bytes:
+        with open(voice_sample_path, "wb") as f:
+            f.write(audio_bytes)
+        st.success("✅ Voice sample recorded!")
+        st.rerun()
+
+    # Upload sample
+    uploaded_file = st.file_uploader("Or upload a WAV file as your voice sample", type=['wav'])
+    if uploaded_file:
+        with open(voice_sample_path, "wb") as f:
+            f.write(uploaded_file.getbuffer())
+        st.success("✅ Voice sample uploaded!")
+        st.rerun()
+
+    # Use default sample button
+    if st.button("Use Default Sample"):
+        if os.path.exists(default_sample_path):
+            import shutil
+            shutil.copy(default_sample_path, voice_sample_path)
+            st.success("✅ Default sample set as current voice sample!")
+            st.rerun()
+
+    # Script input
+    st.markdown("### 📝 Script for Voiceover")
+    test_script = st.text_area("Script:", value="This is a test of the standalone voiceover generation page. You can record or upload your own voice sample, or use the default sample.", height=120)
+
+    output_filename = st.text_input("Output Filename:", value="standalone_voiceover.wav")
+
+    if st.button("Generate Voiceover", type="primary"):
+        with st.spinner("Generating voiceover with Coqui XTTS..."):
+            try:
+                from utils.xtts_voice_generator import XTTSVoiceGenerator
+                generator = XTTSVoiceGenerator(voice_sample_path if os.path.exists(voice_sample_path) else default_sample_path)
+                if not output_filename.endswith('.wav'):
+                    output_filename = output_filename.replace('.mp3', '.wav').replace('.m4a', '.wav')
+                output_path = generator.generate_voiceover(
+                    test_script,
+                    f"output/voiceovers/{output_filename}"
+                )
+                if output_path and os.path.exists(output_path):
+                    st.success(f"✅ Voiceover generated: {output_path}")
+                    st.audio(output_path)
+                else:
+                    st.error("❌ Failed to generate voiceover.")
+            except Exception as e:
+                st.error(f"❌ Error: {e}")
+
 # --- Wizard Navigation ---
 def wizard_nav():
     col1, col2, col3 = st.columns([1, 6, 1])
@@ -324,15 +445,20 @@ def wizard_nav():
             if st.button("Next ➡️", key="next"):
                 st.session_state.step += 1
 
-# --- Main Wizard Flow ---
-wizard_nav()
-if st.session_state.step == 0:
-    script_generation()
-elif st.session_state.step == 1:
-    voiceover_generation()
-elif st.session_state.step == 2:
-    image_generation()
-elif st.session_state.step == 3:
-    video_assembly()
+# --- Sidebar Navigation ---
+page = st.sidebar.radio("Go to page:", ["Wizard", "Standalone Voiceover Generation"])
+
+if page == "Wizard":
+    wizard_nav()
+    if st.session_state.step == 0:
+        script_generation()
+    elif st.session_state.step == 1:
+        voiceover_generation()
+    elif st.session_state.step == 2:
+        image_generation()
+    elif st.session_state.step == 3:
+        video_assembly()
+elif page == "Standalone Voiceover Generation":
+    standalone_voiceover_page()
 
 # Streamlit apps don't need a main() function - they run automatically 
