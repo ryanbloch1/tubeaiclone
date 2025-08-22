@@ -67,57 +67,104 @@ def analyze_script_for_scenes(script: str) -> List[Dict]:
 
 def generate_image_prompt(scene_text: str, scene_number: int) -> str:
     """
-    Generate an image prompt for a scene.
+    Generate an image prompt for a scene by extracting stage directions and visual descriptions.
     Args:
         scene_text (str): The scene text.
-        description (str): Scene description.
+        scene_number (int): Scene number.
     Returns:
         str: Generated image prompt.
     """
-    # Clean up the scene text
-    clean_text = re.sub(r'Scene\s+\d+.*?:', '', scene_text, flags=re.IGNORECASE)
-    clean_text = clean_text.strip()
+    # Extract visual directions from the scene text
+    visual_elements = extract_visual_directions(scene_text)
     
-    # Extract key visual elements
-    visual_keywords = [
-        'space', 'planet', 'stars', 'galaxy', 'spaceship', 'rocket', 'satellite',
-        'earth', 'moon', 'sun', 'asteroid', 'nebula', 'black hole', 'cosmos',
-        'technology', 'computer', 'robot', 'ai', 'artificial intelligence',
-        'future', 'futuristic', 'modern', 'digital', 'virtual reality',
-        'laboratory', 'research', 'scientist', 'experiment', 'discovery',
-        'nature', 'landscape', 'mountain', 'ocean', 'forest', 'desert',
-        'city', 'building', 'architecture', 'urban', 'street', 'traffic',
-        'people', 'person', 'human', 'face', 'emotion', 'expression',
-        'light', 'dark', 'shadow', 'color', 'bright', 'vibrant', 'dramatic'
-    ]
-    
-    # Find visual elements in the text
-    found_elements = []
-    text_lower = clean_text.lower()
-    for keyword in visual_keywords:
-        if keyword in text_lower:
-            found_elements.append(keyword)
-    
-    # Create a base prompt
-    if found_elements:
-        base_prompt = f"Professional video scene: {', '.join(found_elements[:5])}"
+    if visual_elements:
+        # Use the extracted visual directions
+        prompt = f"Professional video scene: {visual_elements}, high quality, cinematic, professional lighting"
     else:
-        base_prompt = "Professional video scene"
-    
-    # Add style modifiers
-    style_modifiers = [
-        "high quality", "cinematic", "professional", "detailed", "realistic",
-        "4K resolution", "vibrant colors", "dramatic lighting", "modern style"
-    ]
-    
-    # Create final prompt
-    prompt = f"{base_prompt}, {', '.join(style_modifiers[:3])}"
+        # Fallback to analyzing the dialogue content
+        prompt = generate_fallback_prompt(scene_text, scene_number)
     
     # Limit prompt length
     if len(prompt) > 500:
         prompt = prompt[:497] + "..."
     
     return prompt
+
+def extract_visual_directions(scene_text: str) -> str:
+    """
+    Extract visual directions from scene text like stage directions and scene descriptions.
+    """
+    visual_elements = []
+    
+    # Extract content from parentheses (stage directions)
+    parentheses_content = re.findall(r'\(([^)]+)\)', scene_text)
+    for content in parentheses_content:
+        if any(word in content.lower() for word in ['show', 'cut to', 'video', 'image', 'footage', 'shot', 'scene']):
+            # Clean up the direction
+            cleaned = re.sub(r'^(show|cut to|video|image|footage|shot|scene)\s*:?\s*', '', content, flags=re.IGNORECASE)
+            if cleaned.strip():
+                visual_elements.append(cleaned.strip())
+    
+    # Extract content from square brackets
+    bracket_content = re.findall(r'\[([^\]]+)\]', scene_text)
+    for content in bracket_content:
+        if any(word in content.lower() for word in ['cut to', 'show', 'opening', 'scene', 'final']):
+            cleaned = re.sub(r'^(cut to|show|opening|scene|final)\s*:?\s*', '', content, flags=re.IGNORECASE)
+            if cleaned.strip():
+                visual_elements.append(cleaned.strip())
+    
+    # Extract scene headers and descriptions (clean up timestamps)
+    scene_descriptions = re.findall(r'Scene\s+\d+[^:]*:\s*([^\n]+)', scene_text, flags=re.IGNORECASE)
+    for desc in scene_descriptions:
+        # Remove timestamps like (0:00-0:30)
+        cleaned_desc = re.sub(r'\([0-9:.-]+\)', '', desc).strip()
+        if cleaned_desc and len(cleaned_desc) > 3:  # Avoid very short descriptions
+            visual_elements.append(cleaned_desc)
+    
+    # Look for lines starting with visual direction words
+    lines = scene_text.split('\n')
+    for line in lines:
+        line = line.strip()
+        if re.match(r'^(Show|Cut to|Display|Open on|Focus on|Zoom in|Pan to|Fade|Video|Image)', line, re.IGNORECASE):
+            # Remove the direction word and keep the description
+            cleaned = re.sub(r'^(Show|Cut to|Display|Open on|Focus on|Zoom in|Pan to|Fade|Video|Image)\s*:?\s*', '', line, flags=re.IGNORECASE)
+            if cleaned.strip():
+                visual_elements.append(cleaned.strip())
+    
+    # Combine and clean up visual elements
+    if visual_elements:
+        combined = ', '.join(visual_elements[:3])  # Use first 3 elements
+        # Clean up the combined text
+        combined = re.sub(r'[.!?]+$', '', combined)  # Remove trailing punctuation
+        return combined
+    
+    return ""
+
+def generate_fallback_prompt(scene_text: str, scene_number: int) -> str:
+    """
+    Generate a fallback prompt based on dialogue content when no stage directions are found.
+    """
+    # Extract key concepts from dialogue
+    text_lower = scene_text.lower()
+    
+    # Topic-specific keywords
+    concepts = []
+    
+    if any(word in text_lower for word in ['pyramid', 'egypt', 'ancient', 'pharaoh']):
+        concepts.extend(['ancient Egyptian pyramids', 'desert landscape', 'golden lighting'])
+    elif any(word in text_lower for word in ['golf', 'scottish', 'course', 'tournament']):
+        concepts.extend(['golf course', 'green landscape', 'Scottish highlands'])
+    elif any(word in text_lower for word in ['space', 'alien', 'star', 'planet']):
+        concepts.extend(['space scene', 'stars', 'cosmic background'])
+    elif any(word in text_lower for word in ['technology', 'ai', 'computer', 'future']):
+        concepts.extend(['futuristic technology', 'digital interface', 'modern setting'])
+    else:
+        concepts.extend(['professional setting', 'clean background'])
+    
+    if concepts:
+        return f"Professional video scene: {', '.join(concepts[:3])}, high quality, cinematic"
+    else:
+        return f"Professional video scene {scene_number}, high quality, cinematic, professional lighting"
 
 def generate_image_huggingface(prompt: str, output_path: str, api_key: Optional[str] = None) -> bool:
     """

@@ -7,6 +7,12 @@ from playsound import playsound
 import sounddevice as sd
 from scipy.io.wavfile import write
 import threading
+import os
+try:
+    import torch
+    TORCH_AVAILABLE = True
+except Exception:
+    TORCH_AVAILABLE = False
 
 class VoiceoverPage(tk.Frame):
     def __init__(self, parent, controller):
@@ -144,9 +150,23 @@ class VoiceoverPage(tk.Frame):
         self.progress.grid(row=1, column=0, sticky="ew", pady=5)
 
         # Status text
+        # Device status
+        device_str = "CPU"
+        if TORCH_AVAILABLE:
+            try:
+                if hasattr(torch, 'cuda') and torch.cuda.is_available():
+                    device_str = "GPU"
+                elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+                    device_str = "MPS"
+            except Exception:
+                pass
+        self.device_label = tk.Label(status_content, text=f"Device: {device_str}",
+                                     font=self.text_font, bg="#fff", fg="#666")
+        self.device_label.grid(row=2, column=0, sticky="w", pady=(0,5))
+
         self.status_text = tk.Label(status_content, text="Ready to generate voiceover", 
                                   font=self.text_font, bg="#fff", fg="#666")
-        self.status_text.grid(row=2, column=0, sticky="w", pady=5)
+        self.status_text.grid(row=3, column=0, sticky="w", pady=5)
 
         # Audio player frame (placeholder)
         audio_frame = tk.Frame(status_content, bg="#fff")

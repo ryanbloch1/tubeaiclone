@@ -37,6 +37,9 @@ def sanitize_script(script):
     script = re.sub(r'^\d+\.\s*', '', script, flags=re.MULTILINE)
     script = re.sub(r'^[-*•]\s*', '', script, flags=re.MULTILINE)
     
+    # Remove scene directions and stage directions (for voiceover-only content)
+    script = remove_scene_directions(script)
+    
     # Clean up common profanity and sensitive content (YouTube-safe alternatives)
     profanity_replacements = {
         r'\bdamn\b': 'darn',
@@ -86,6 +89,63 @@ def sanitize_script(script):
         script += '.'
     
     return script
+
+def remove_scene_directions(script):
+    """
+    Remove scene directions, stage directions, and other non-spoken content.
+    This is essential for voiceover generation - only spoken dialogue should remain.
+    
+    Args:
+        script (str): Script that may contain scene directions
+        
+    Returns:
+        str: Script with only spoken content
+    """
+    if not script:
+        return script
+    
+    # Remove scene headers (e.g., "Scene 1 (0:00-0:30): Description")
+    script = re.sub(r'^Scene\s+\d+\s*\([^)]+\):\s*[^\n]*\n?', '', script, flags=re.MULTILINE | re.IGNORECASE)
+    
+    # Remove stage directions in parentheses
+    script = re.sub(r'\([^)]*\)', '', script)
+    
+    # Remove square bracketed directions
+    script = re.sub(r'\[[^\]]*\]', '', script)
+    
+    # Remove "Narrator:" labels and similar
+    script = re.sub(r'^(Narrator|Host|Speaker):\s*', '', script, flags=re.MULTILINE | re.IGNORECASE)
+    
+    # Remove lines that are clearly directions (start with action words)
+    direction_patterns = [
+        r'^(Show|Cut to|Display|Open on|Focus on|Zoom in|Pan to|Fade|Transition).*$',
+        r'^(Video|Audio|Music|Sound).*$',
+        r'^(Note|Remember|Important).*$'
+    ]
+    for pattern in direction_patterns:
+        script = re.sub(pattern, '', script, flags=re.MULTILINE | re.IGNORECASE)
+    
+    # Remove lines with only timestamps or technical info
+    script = re.sub(r'^\d+:\d+[-–]\d+:\d+.*$', '', script, flags=re.MULTILINE)
+    script = re.sub(r'^Length:.*$', '', script, flags=re.MULTILINE)
+    script = re.sub(r'^Style:.*$', '', script, flags=re.MULTILINE)
+    
+    # Remove pipe characters (often used as separators in scripts)
+    script = re.sub(r'\s*\|\s*', ' ', script)
+    
+    # Remove lines that are just formatting or metadata
+    script = re.sub(r'^[-=]+$', '', script, flags=re.MULTILINE)
+    
+    # Clean up multiple newlines and spaces
+    script = re.sub(r'\n\s*\n\s*\n+', '\n\n', script)  # Multiple newlines to double
+    script = re.sub(r'\n\s*\n', '\n', script)          # Double newlines to single
+    script = re.sub(r' +', ' ', script)                 # Multiple spaces to single
+    
+    # Remove empty lines and trim
+    lines = [line.strip() for line in script.split('\n') if line.strip()]
+    script = ' '.join(lines)
+    
+    return script.strip()
 
 def split_script_into_segments(script, max_segment_length=200):
     """

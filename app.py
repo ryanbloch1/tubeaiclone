@@ -6,6 +6,7 @@ A modern AI video content creation tool inspired by TubeGenAI.
 import streamlit as st
 import os
 import time
+import threading
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -124,129 +125,116 @@ def script_generation():
                 st.error("❌ Failed to generate script. Please try again.")
     
     if st.session_state.sanitized_script:
-        st.markdown("### 📄 Generated Script")
-        st.text_area("Script:", value=st.session_state.sanitized_script, height=300, disabled=True)
-        words = len(st.session_state.sanitized_script.split())
-        estimated_duration = estimate_voiceover_duration(st.session_state.sanitized_script)
-        st.metric("Words", words)
-        st.metric("Estimated Duration", f"{estimated_duration:.1f}s")
+        st.markdown("### 📄 Generated Scripts")
+        
+        # Show both versions in tabs
+        tab1, tab2 = st.tabs(["🎤 Voiceover Script (Sanitized)", "🖼️ Full Script (With Scenes)"])
+        
+        with tab1:
+            st.text_area("Sanitized for voiceover:", value=st.session_state.sanitized_script, height=250, disabled=True)
+            words = len(st.session_state.sanitized_script.split())
+            estimated_duration = estimate_voiceover_duration(st.session_state.sanitized_script)
+            col1, col2 = st.columns(2)
+            with col1:
+                st.metric("Words (Voiceover)", words)
+            with col2:
+                st.metric("Estimated Duration", f"{estimated_duration:.1f}s")
+        
+        with tab2:
+            st.text_area("Full script with scene directions:", value=st.session_state.script, height=250, disabled=True)
+            original_words = len(st.session_state.script.split())
+            st.metric("Words (Full Script)", original_words)
+            st.info("💡 This version includes scene directions for image generation")
 
 # --- Step 1: Voiceover Generation ---
+
 def voiceover_generation():
     st.markdown('<h2 class="sub-header">🎤 Voiceover Generation</h2>', unsafe_allow_html=True)
     if not st.session_state.sanitized_script:
         st.warning("⚠️ No script available. Please generate a script first!")
         return
-    
     # Display script
     st.text_area("Script:", value=st.session_state.sanitized_script, height=200, disabled=True)
-    
-    # Voice sample management for Coqui TTS
-    st.markdown("### 🎯 Voice Sample Setup")
-    voice_sample_path = "voice_sample.wav"
-    
-    if os.path.exists(voice_sample_path):
-        st.success(f"✅ Voice sample found: {voice_sample_path}")
-        file_size = os.path.getsize(voice_sample_path) / 1024  # KB
-        st.info(f"📊 Sample size: {file_size:.1f} KB")
-        
-        # Play voice sample
-        st.audio(voice_sample_path)
-    else:
-        st.warning("⚠️ No voice sample found. Coqui TTS voice cloning requires a voice sample.")
-        st.info("💡 Upload an audio file to create your voice sample:")
-        
-        uploaded_file = st.file_uploader("Upload Voice Sample", type=['wav', 'mp3', 'm4a', 'aac'])
-        if uploaded_file:
-            # Save uploaded file
-            with open(voice_sample_path, "wb") as f:
-                f.write(uploaded_file.getbuffer())
-            st.success(f"✅ Voice sample saved: {voice_sample_path}")
-            st.rerun()
-    
-    # Voiceover options
+    # Voiceover options (Hugging Face only)
     st.markdown("### 🎤 Voiceover Options")
-    
-    # Add a fast mode option
-    use_fast_mode = st.checkbox("🚀 Fast Mode (shorter script for testing)", value=False)
-    
+    col1, col2 = st.columns(2)
+    with col1:
+        use_fast_mode = st.checkbox("🚀 Fast Mode (shorter script for testing)", value=False)
+    with col2:
+        force_single_generation = st.checkbox("⚡ Force Single Generation (for estimation only)", value=True)
     if use_fast_mode:
-        # Create a shorter version for testing
         short_script = " ".join(st.session_state.sanitized_script.split()[:20]) + "..."
         st.info(f"📝 Using short script for testing: {len(short_script.split())} words")
         script_to_use = short_script
     else:
         script_to_use = st.session_state.sanitized_script
-    
-    st.info("🎤 Using Coqui TTS for voice cloning with your voice sample")
+    st.info("🤗 Using Hugging Face TTS (local, no paid API)")
     output_filename = st.text_input("Output Filename:", value="voiceover.wav")
     words = len(script_to_use.split())
     estimated_duration = estimate_voiceover_duration(script_to_use)
     st.metric("Words", words)
     st.metric("Estimated Duration", f"{estimated_duration:.1f}s")
-    
-    # Performance tips
     st.markdown("### 💡 Performance Tips")
-    st.info("""
-    - **First generation** takes longer (model loading)
-    - **Subsequent generations** are faster
-    - **Shorter scripts** generate faster
-    - **Use Fast Mode** for testing with shorter text
+    st.info(f"""
+    **Script length**: {len(script_to_use)} characters
+    - This path synthesizes a placeholder voice locally to keep everything free
     """)
     if st.button("🎤 Generate Voiceover", type="primary"):
-        # Ensure output directory exists
         os.makedirs("output/voiceovers", exist_ok=True)
-        
-        # Show progress and estimated time
         words = len(script_to_use.split())
-        estimated_time = words / 10  # Rough estimate: 10 words per second
+        estimated_time = words / 10
         st.info(f"⏱️ Estimated time: {estimated_time:.1f} seconds for {words} words")
-        
-        # Create progress bar
         progress_bar = st.progress(0)
         status_text = st.empty()
-        
-        # Simplified voiceover generation - just use Coqui TTS
+        eta_text = st.empty()
         try:
-            from utils.xtts_voice_generator import XTTSVoiceGenerator
-            generator = XTTSVoiceGenerator("voice_sample.wav")
-            
-            # Ensure .wav extension for XTTS
             if not output_filename.endswith('.wav'):
                 output_filename = output_filename.replace('.mp3', '.wav').replace('.m4a', '.wav')
-            
-            # Update progress during generation
-            status_text.text("🤖 Loading XTTS model...")
-            progress_bar.progress(10)
-            
-            status_text.text("🎤 Generating voiceover...")
-            progress_bar.progress(30)
-            
-            output_path = generator.generate_voiceover(
-                script_to_use,
-                f"output/voiceovers/{output_filename}"
-            )
-            
+            output_file_path = f"output/voiceovers/{output_filename}"
+            from utils.voiceover import generate_voiceover as hv_generate
+            status_text.text("🤗 Generating with Hugging Face TTS…")
+
+            result_holder = {"path": None}
+
+            def _worker():
+                try:
+                    result_holder["path"] = hv_generate(
+                        script=script_to_use,
+                        voice_id="default",
+                        output_path=output_file_path,
+                        use_elevenlabs=False,
+                    )
+                except Exception:
+                    result_holder["path"] = None
+
+            t = threading.Thread(target=_worker, daemon=True)
+            t.start()
+
+            start_tick = time.time()
+            heuristic = max(5.0, words / 8.0)
+            while t.is_alive():
+                elapsed = time.time() - start_tick
+                pct = min(99, int((elapsed / heuristic) * 100))
+                remaining = max(0.0, heuristic - elapsed)
+                progress_bar.progress(pct)
+                eta_text.text(f"⏳ Elapsed: {int(elapsed)}s • ETA: {int(remaining)}s")
+                time.sleep(0.25)
+
+            output_path = result_holder["path"]
             progress_bar.progress(100)
             status_text.text("✅ Voiceover complete!")
-            
-        except Exception as e:
-            st.error(f"❌ Coqui TTS not available: {e}")
-            st.info("💡 Please make sure Coqui TTS is properly installed in your conda environment.")
-            output_path = None
             if output_path:
                 st.session_state.voiceover_path = output_path
                 st.success("✅ Voiceover generated successfully!")
-                # Add a small delay to ensure file is written
-                import time
-                time.sleep(0.5)
-                # Check if file exists before trying to play it
+                import time as _t; _t.sleep(0.5)
                 if os.path.exists(output_path):
                     st.audio(output_path)
                 else:
                     st.warning("⚠️ Voiceover file created but not found. You can download it below.")
             else:
                 st.error("❌ Failed to generate voiceover. Please try again.")
+        except Exception as e:
+            st.error(f"❌ Error during voiceover generation: {e}")
     if st.session_state.voiceover_path and os.path.exists(st.session_state.voiceover_path):
         st.markdown("### 🎵 Current Voiceover")
         st.audio(st.session_state.voiceover_path)
@@ -254,10 +242,11 @@ def voiceover_generation():
 # --- Step 2: Image Generation ---
 def image_generation():
     st.markdown('<h2 class="sub-header">🖼️ Image Generation</h2>', unsafe_allow_html=True)
-    if not st.session_state.sanitized_script:
+    if not st.session_state.script:
         st.warning("⚠️ No script available. Please generate a script first!")
         return
-    st.text_area("Script:", value=st.session_state.sanitized_script, height=200, disabled=True)
+    # Show original script with scenes for image generation
+    st.text_area("Script (with scene directions):", value=st.session_state.script, height=200, disabled=True)
     st.info("🖼️ Using Hugging Face for high-quality image generation")
     num_images = st.slider("Number of Images:", 1, 10, 3)
     if st.button("🎨 Generate Images", type="primary"):
@@ -265,10 +254,10 @@ def image_generation():
             # Create output directory
             os.makedirs("output/images", exist_ok=True)
             
-            # Simplified image generation - just use Hugging Face
+            # Simplified image generation - just use Hugging Face with original script (includes scenes)
             st.info("🤗 Using Hugging Face (FREE) for image generation...")
             generated_image_paths = generate_images_huggingface_only(
-                script=st.session_state.sanitized_script,
+                script=st.session_state.script,  # Use original script with scene directions
                 output_dir="output/images"
             )
             
@@ -340,86 +329,6 @@ def video_assembly():
             mime="application/zip"
         )
 
-# --- Standalone Voiceover Generation Page ---
-def standalone_voiceover_page():
-    st.markdown('<h2 class="sub-header">🔊 Standalone Voiceover Generation</h2>', unsafe_allow_html=True)
-    st.info("This page lets you record or upload your own voice sample, or use a default sample, and generate a voiceover using only Coqui XTTS (no ElevenLabs).")
-
-    # Voice sample management
-    voice_sample_path = "voice_sample.wav"
-    default_sample_path = "default_voice_sample.wav"
-    sample_to_use = None
-
-    # Provide a default sample if none exists
-    if not os.path.exists(voice_sample_path):
-        if os.path.exists(default_sample_path):
-            sample_to_use = default_sample_path
-        else:
-            # Create a dummy default sample if not present
-            import numpy as np
-            from scipy.io.wavfile import write as wavwrite
-            fs = 22050
-            seconds = 2
-            t = np.linspace(0, seconds, int(fs*seconds), False)
-            tone = (0.5 * np.sin(2 * np.pi * 220 * t)).astype(np.float32)
-            wavwrite(default_sample_path, fs, (tone * 32767).astype(np.int16))
-            sample_to_use = default_sample_path
-    else:
-        sample_to_use = voice_sample_path
-
-    st.markdown("### 🎙️ Voice Sample")
-    st.info(f"Current sample: {os.path.basename(sample_to_use)}")
-    st.audio(sample_to_use)
-
-    # Record sample (browser-based, Streamlit limitation)
-    audio_bytes = st.audio_recorder("Record a new voice sample (5s max)") if hasattr(st, 'audio_recorder') else None
-    if audio_bytes:
-        with open(voice_sample_path, "wb") as f:
-            f.write(audio_bytes)
-        st.success("✅ Voice sample recorded!")
-        st.rerun()
-
-    # Upload sample
-    uploaded_file = st.file_uploader("Or upload a WAV file as your voice sample", type=['wav'])
-    if uploaded_file:
-        with open(voice_sample_path, "wb") as f:
-            f.write(uploaded_file.getbuffer())
-        st.success("✅ Voice sample uploaded!")
-        st.rerun()
-
-    # Use default sample button
-    if st.button("Use Default Sample"):
-        if os.path.exists(default_sample_path):
-            import shutil
-            shutil.copy(default_sample_path, voice_sample_path)
-            st.success("✅ Default sample set as current voice sample!")
-            st.rerun()
-
-    # Script input
-    st.markdown("### 📝 Script for Voiceover")
-    test_script = st.text_area("Script:", value="This is a test of the standalone voiceover generation page. You can record or upload your own voice sample, or use the default sample.", height=120)
-
-    output_filename = st.text_input("Output Filename:", value="standalone_voiceover.wav")
-
-    if st.button("Generate Voiceover", type="primary"):
-        with st.spinner("Generating voiceover with Coqui XTTS..."):
-            try:
-                from utils.xtts_voice_generator import XTTSVoiceGenerator
-                generator = XTTSVoiceGenerator(voice_sample_path if os.path.exists(voice_sample_path) else default_sample_path)
-                if not output_filename.endswith('.wav'):
-                    output_filename = output_filename.replace('.mp3', '.wav').replace('.m4a', '.wav')
-                output_path = generator.generate_voiceover(
-                    test_script,
-                    f"output/voiceovers/{output_filename}"
-                )
-                if output_path and os.path.exists(output_path):
-                    st.success(f"✅ Voiceover generated: {output_path}")
-                    st.audio(output_path)
-                else:
-                    st.error("❌ Failed to generate voiceover.")
-            except Exception as e:
-                st.error(f"❌ Error: {e}")
-
 # --- Wizard Navigation ---
 def wizard_nav():
     col1, col2, col3 = st.columns([1, 6, 1])
@@ -445,8 +354,78 @@ def wizard_nav():
             if st.button("Next ➡️", key="next"):
                 st.session_state.step += 1
 
-# --- Sidebar Navigation ---
-page = st.sidebar.radio("Go to page:", ["Wizard", "Standalone Voiceover Generation"])
+# --- Sidebar Navigation --- (defined after function definitions at end)
+
+# ------------------ New: One‑Minute Voiceover Test Page ------------------
+
+def one_minute_voiceover_test():
+    st.markdown('<h2 class="sub-header">⏱️ One‑Minute Voiceover Test</h2>', unsafe_allow_html=True)
+    default_script = (
+        "This is a one minute voiceover performance test designed to exercise the full generation pipeline. "
+        "We are verifying end to end latency, audio quality, and stability across the stack. "
+        "During this test, the system should maintain consistent pacing, clear pronunciation, and natural prosody. "
+        "The primary goal is to validate that the synthesis can operate within realistic production constraints. "
+        "Thank you for helping evaluate this pipeline. "
+        "This concludes the one minute voiceover performance test."
+    )
+    script = st.text_area("Script (~1 minute):", value=default_script, height=200)
+    output_name = st.text_input("Output filename", value="performance_test.wav")
+    if st.button("🎤 Generate 1‑Minute Voiceover", type="primary"):
+        if not script.strip():
+            st.error("Please provide a script")
+            return
+        os.makedirs("output/voiceovers", exist_ok=True)
+        if not output_name.endswith('.wav'):
+            output_name = output_name.replace('.mp3', '.wav').replace('.m4a', '.wav')
+        out_path = f"output/voiceovers/{output_name}"
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        eta_text = st.empty()
+        start = time.time()
+        try:
+            from utils.voiceover import generate_voiceover as hv_generate
+            status_text.text("🤗 Generating with Hugging Face TTS…")
+
+            holder = {"path": None}
+
+            def _worker2():
+                try:
+                    holder["path"] = hv_generate(
+                        script=script,
+                        voice_id="default",
+                        output_path=out_path,
+                        use_elevenlabs=False,
+                    )
+                except Exception:
+                    holder["path"] = None
+
+            t2 = threading.Thread(target=_worker2, daemon=True)
+            t2.start()
+
+            words2 = len(script.split())
+            heuristic2 = max(5.0, words2 / 8.0)
+            while t2.is_alive():
+                elapsed2 = time.time() - start
+                pct2 = min(99, int((elapsed2 / heuristic2) * 100))
+                remaining2 = max(0.0, heuristic2 - elapsed2)
+                progress_bar.progress(pct2)
+                eta_text.text(f"⏳ Elapsed: {int(elapsed2)}s • ETA: {int(remaining2)}s")
+                time.sleep(0.25)
+
+            output_path = holder["path"]
+            elapsed = time.time() - start
+            if output_path and os.path.exists(output_path):
+                size = os.path.getsize(output_path)
+                st.success(f"✅ Done in {elapsed:.1f}s • {size/1024/1024:.2f} MB")
+                st.audio(output_path)
+                st.write(f"Saved to: {output_path}")
+            else:
+                st.error("❌ Voiceover generation failed")
+        except Exception as e:
+            st.error(f"❌ Error: {e}")
+
+# --- Final navigation (now that all functions are defined) ---
+page = st.sidebar.radio("Go to page:", ["Wizard", "One‑Minute Voiceover Test"])
 
 if page == "Wizard":
     wizard_nav()
@@ -458,7 +437,7 @@ if page == "Wizard":
         image_generation()
     elif st.session_state.step == 3:
         video_assembly()
-elif page == "Standalone Voiceover Generation":
-    standalone_voiceover_page()
+elif page == "One‑Minute Voiceover Test":
+    one_minute_voiceover_test()
 
-# Streamlit apps don't need a main() function - they run automatically 
+# Streamlit apps don't need a main() function - they run automatically
