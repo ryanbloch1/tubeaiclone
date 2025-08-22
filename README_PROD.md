@@ -15,3 +15,11 @@ Notes:
 - Worker uses utils.voiceover.generate_voiceover (XTTS v2 local if available).
 - Media saved under output/voiceovers.
 - Set VOICE_SAMPLE_PATH env or pass voice_sample_path in the request.
+
+Monorepo layout:
+- apps/
+  - api/ (FastAPI entry)
+  - worker/ (RQ worker entry)
+  - streamlit/ (legacy UI entry)
+- api/, worker/ keep modules for compatibility
+- utils/ shared modules

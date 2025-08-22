@@ -1,0 +1,28 @@
+[tool.poetry]
+name = "tubeaiclone"
+version = "0.1.0"
+description = "TubeAI clone monorepo (apps: api, worker, streamlit; libs: utils)"
+authors = ["Ryan Bloch <you@example.com>"]
+
+[tool.poetry.dependencies]
+python = "^3.11"
+
+[tool.poetry.group.api.dependencies]
+fastapi = "*"
+uvicorn = "*"
+redis = "*"
+rq = "*"
+
+[tool.poetry.group.worker.dependencies]
+redis = "*"
+rq = "*"
+
+[tool.poetry.group.streamlit.dependencies]
+streamlit = "*"
+streamlit-audiorecorder = "*"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+
