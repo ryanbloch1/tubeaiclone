@@ -174,6 +174,12 @@ def create_huggingface_style_audio(script, output_path):
         print(f"Error creating spoken audio: {e}")
         return create_ultra_simple_audio(output_path, 10)
 
+def _split_into_sentences(text: str) -> list[str]:
+    import re
+    # Simple sentence splitter; keeps it conservative
+    parts = re.split(r"(?<=[\.!?])\s+", text.strip())
+    return [p.strip() for p in parts if p.strip()]
+
 def generate_voiceover_xtts_hf(script: str, output_path: str, speaker_wav: str, language: str = "en", force_cpu: bool = True) -> bool:
     """
     Generate real speech using Coqui‑AI XTTS‑v2 model loaded via Hugging Face (local).
@@ -182,26 +188,61 @@ def generate_voiceover_xtts_hf(script: str, output_path: str, speaker_wav: str, 
     try:
         from TTS.api import TTS as COQUI_TTS
         import torch
+        import os
+        os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
         if not os.path.exists(speaker_wav) or os.path.getsize(speaker_wav) == 0:
             print(f"XTTS speaker_wav missing: {speaker_wav}")
             return False
         print("[XTTS] Loading coqui‑ai/XTTS‑v2 (local)…")
         tts = COQUI_TTS("tts_models/multilingual/multi-dataset/xtts_v2")
+        # Force CPU on macOS to avoid MPS kernel limitations and ensure stability
         device = "cpu"
-        if not force_cpu:
-            if hasattr(torch, "cuda") and torch.cuda.is_available():
-                device = "cuda"
-            elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-                device = "mps"
         try:
             tts = tts.to(device)
         except Exception:
-            device = "cpu"
+            pass
         print(f"[XTTS] Using {device}")
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
-        tts.tts_to_file(text=script, file_path=output_path, speaker_wav=speaker_wav, language=language)
+
+        # Chunk long text to reduce drift and improve speed/memory
+        sentences = _split_into_sentences(script)
+        try:
+            from pydub import AudioSegment
+        except Exception:
+            # If pydub not available, fall back to one-shot
+            tts.tts_to_file(text=script, file_path=output_path, speaker_wav=speaker_wav, language=language)
+            return os.path.exists(output_path) and os.path.getsize(output_path) > 0
+
+        combined = AudioSegment.silent(duration=0)
+        sample_rate = 22050
+        import numpy as np
+        from tempfile import NamedTemporaryFile
+
+        for idx, sent in enumerate(sentences):
+            if not sent:
+                continue
+            try:
+                # Generate raw audio for the sentence
+                wav = tts.tts(text=sent, speaker_wav=speaker_wav, language=language)
+                # Convert numpy float waveform to pydub AudioSegment
+                wav_np = np.array(wav)
+                # Normalize to int16
+                wav_int16 = np.clip(wav_np * 32767.0, -32768, 32767).astype(np.int16)
+                # Write to temp WAV and load via pydub (simplest cross-platform path)
+                with NamedTemporaryFile(suffix=".wav", delete=True) as tf:
+                    import soundfile as sf
+                    sf.write(tf.name, wav_int16, sample_rate, subtype='PCM_16')
+                    seg = AudioSegment.from_wav(tf.name)
+                combined += seg + AudioSegment.silent(duration=60)  # 60ms pause between sentences
+            except Exception as se:
+                print(f"[XTTS] Sentence synthesis failed at {idx}: {se}")
+                continue
+
+        if len(combined) == 0:
+            return False
+        combined.export(output_path, format="wav")
         ok = os.path.exists(output_path) and os.path.getsize(output_path) > 0
-        print(f"[XTTS] Wrote: {output_path} -> {ok}")
+        print(f"[XTTS] Wrote (chunked): {output_path} -> {ok}")
         return ok
     except Exception as e:
         print(f"[XTTS] Error: {e}")

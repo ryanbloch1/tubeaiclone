@@ -155,6 +155,49 @@ def voiceover_generation():
         return
     # Display script
     st.text_area("Script:", value=st.session_state.sanitized_script, height=200, disabled=True)
+
+    # Voice sample record/upload
+    st.markdown("### 🎙️ Voice Sample (Record or Upload)")
+    sample_target = os.getenv("VOICE_SAMPLE_PATH", "voice_sample.wav")
+    col_rec, col_up = st.columns(2)
+    with col_rec:
+        try:
+            from audiorecorder import audiorecorder
+            st.caption("Record 10–30s of clean speech")
+            audio = audiorecorder("🎙️ Click to record", "⏹️ Click to stop")
+            if audio is not None and len(audio) > 0:
+                st.audio(audio.export(format="wav").read(), format="audio/wav")
+                # Export to path
+                audio.export(sample_target, format="wav")
+                st.success(f"✅ Saved new voice sample → {sample_target}")
+        except Exception as e:
+            st.info("Install recorder: pip install streamlit-audiorecorder")
+    with col_up:
+        uploaded = st.file_uploader("Upload WAV/MP3/M4A", type=["wav", "mp3", "m4a"]) 
+        if uploaded is not None:
+            # Convert to WAV mono 22050 with ffmpeg if not wav
+            tmp_path = f"output/voiceovers/_tmp_upload_{int(time.time())}"
+            target_dir = os.path.dirname(sample_target) or "."
+            os.makedirs(target_dir, exist_ok=True)
+            with open(tmp_path, "wb") as f:
+                f.write(uploaded.getbuffer())
+            # Normalize via ffmpeg
+            import subprocess
+            cmd = [
+                'ffmpeg','-y','-i', tmp_path,
+                '-ar','22050','-ac','1', sample_target
+            ]
+            try:
+                subprocess.run(cmd, check=True, capture_output=True)
+                st.success(f"✅ Uploaded & converted → {sample_target}")
+                st.audio(sample_target)
+            except Exception as conv_err:
+                st.error(f"Conversion failed: {conv_err}")
+            finally:
+                try:
+                    os.remove(tmp_path)
+                except Exception:
+                    pass
     # Voiceover options (Hugging Face only)
     st.markdown("### 🎤 Voiceover Options")
     col1, col2 = st.columns(2)
