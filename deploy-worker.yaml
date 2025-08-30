@@ -1,0 +1,27 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: tubeaiclone-worker
+  annotations:
+    run.googleapis.com/ingress: none
+spec:
+  template:
+    metadata:
+      annotations:
+        run.googleapis.com/cpu-boost: true
+        run.googleapis.com/execution-environment: gen2
+    spec:
+      containerConcurrency: 1
+      containers:
+      - image: us-central1-docker.pkg.dev/tube-ai-testing/tubeaiclone/worker-simple:latest
+        env:
+        - name: REDIS_URL
+          value: "REPLACE_WITH_UPSTASH_REDIS_URL"
+        - name: QUEUE_NAME
+          value: "voiceover_queue"
+        - name: GCS_BUCKET
+          value: "tubeaiclone-voiceovers-1756234433"
+        resources:
+          limits:
+            cpu: "1"
+            memory: "2Gi"

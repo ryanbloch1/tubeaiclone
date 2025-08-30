@@ -1,8 +1,10 @@
 FROM python:3.11-slim
 WORKDIR /app
 COPY requirements.txt /app/requirements.txt
-RUN pip install --no-cache-dir -r /app/requirements.txt fastapi uvicorn redis rq
+RUN pip install --no-cache-dir -r /app/requirements.txt fastapi uvicorn redis rq google-cloud-storage
 COPY . /app
-EXPOSE 8000
-CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+ENV PORT=8080
+EXPOSE 8080
+# Bind to Cloud Run-provided $PORT (default 8080 locally)
+CMD ["sh", "-c", "uvicorn api.main:app --host 0.0.0.0 --port ${PORT:-8080}"]
 

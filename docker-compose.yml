@@ -10,6 +10,7 @@ services:
       context: .
       dockerfile: Dockerfile.api
     environment:
+      - PORT=8000
       - REDIS_URL=redis://redis:6379/0
       - QUEUE_NAME=voiceovers
       - PYTHONUNBUFFERED=1
@@ -28,6 +29,7 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - QUEUE_NAME=voiceovers
       - PYTHONUNBUFFERED=1
+      - VOICE_SAMPLE_PATH=/app/voice_sample.wav
     depends_on:
       - redis
     volumes:

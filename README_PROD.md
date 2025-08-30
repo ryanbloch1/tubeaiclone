@@ -17,6 +17,7 @@ Notes:
 - Set VOICE_SAMPLE_PATH env or pass voice_sample_path in the request.
 
 Monorepo layout:
+
 - apps/
   - api/ (FastAPI entry)
   - worker/ (RQ worker entry)

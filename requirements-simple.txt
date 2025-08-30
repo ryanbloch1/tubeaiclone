@@ -1,0 +1,21 @@
+# Core web frameworks
+fastapi==0.104.1
+uvicorn==0.24.0
+flask==3.0.0
+
+# Task queue
+redis==5.0.1
+rq==1.16.0
+
+# Cloud storage
+google-cloud-storage==2.10.0
+
+# Audio processing
+pydub==0.25.1
+soundfile==0.12.1
+
+# (Removed heavy AI/ML deps for faster build and simpler runtime)
+
+# Utilities
+python-multipart==0.0.6
+requests==2.31.0

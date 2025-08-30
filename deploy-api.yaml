@@ -1,0 +1,28 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: tubeaiclone-api
+  annotations:
+    run.googleapis.com/ingress: all
+spec:
+  template:
+    metadata:
+      annotations:
+        run.googleapis.com/cpu-boost: "true"
+        run.googleapis.com/execution-environment: gen2
+    spec:
+      containerConcurrency: 10
+      timeoutSeconds: 300
+      containers:
+      - image: us-central1-docker.pkg.dev/tube-ai-testing/tubeaiclone/api-simple:latest
+        ports:
+        - containerPort: 8080
+        env:
+        - name: QUEUE_NAME
+          value: "voiceover_queue"
+        - name: GCS_BUCKET
+          value: "tubeaiclone-voiceovers-1756234433"
+        resources:
+          limits:
+            cpu: "1"
+            memory: "1Gi"
