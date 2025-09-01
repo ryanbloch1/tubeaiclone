@@ -1,8 +1,32 @@
 @import "tailwindcss";
 
+/* TubeAI Video Creation Tool - Global Theme */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* Core brand colors */
+  --primary: #3b82f6;          /* blue-500 */
+  --primary-hover: #2563eb;    /* blue-600 */
+  --primary-light: #dbeafe;    /* blue-100 */
+  
+  /* Neutral backgrounds */
+  --background: #f8fafc;       /* slate-50 - main app background */
+  --background-card: #ffffff;  /* white - cards, modals */
+  --background-elevated: #f1f5f9; /* slate-100 - elevated elements */
+  
+  /* Text colors */
+  --foreground: #0f172a;       /* slate-900 - primary text */
+  --foreground-muted: #64748b; /* slate-500 - secondary text */
+  --foreground-subtle: #94a3b8; /* slate-400 - subtle text */
+  
+  /* Interactive states */
+  --accent: #10b981;           /* emerald-500 - success/complete */
+  --accent-hover: #059669;     /* emerald-600 */
+  --warning: #f59e0b;          /* amber-500 */
+  --error: #ef4444;            /* red-500 */
+  
+  /* Video creation specific */
+  --timeline: #374151;         /* gray-700 - timeline elements */
+  --waveform: #6366f1;         /* indigo-500 - audio visualization */
+  --scene-border: #e2e8f0;     /* slate-200 - scene separators */
 }
 
 @theme inline {
@@ -14,13 +38,44 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --background: #0f172a;       /* slate-900 */
+    --background-card: #1e293b;  /* slate-800 */
+    --background-elevated: #334155; /* slate-700 */
+    --foreground: #f1f5f9;       /* slate-100 */
+    --foreground-muted: #94a3b8; /* slate-400 */
+    --foreground-subtle: #64748b; /* slate-500 */
+    --scene-border: #475569;     /* slate-600 */
   }
 }
 
+/* Global app styling */
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  line-height: 1.5;
+  font-feature-settings: 'cv03', 'cv04', 'cv11';
+}
+
+/* Smooth transitions for theme changes */
+*, *::before, *::after {
+  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+}
+
+/* Custom scrollbar for video timeline */
+.timeline-scroll::-webkit-scrollbar {
+  height: 8px;
+}
+
+.timeline-scroll::-webkit-scrollbar-track {
+  background: var(--background-elevated);
+}
+
+.timeline-scroll::-webkit-scrollbar-thumb {
+  background: var(--timeline);
+  border-radius: 4px;
+}
+
+.timeline-scroll::-webkit-scrollbar-thumb:hover {
+  background: var(--foreground-muted);
 }

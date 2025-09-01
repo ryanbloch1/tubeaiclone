@@ -1,4 +1,11 @@
 import os
+try:
+    # Load environment variables from a .env file (project root)
+    from dotenv import load_dotenv, find_dotenv
+    # Use override=True so .env values replace any empty pre-set envs
+    load_dotenv(find_dotenv(), override=True)
+except Exception:
+    pass
 import tempfile
 import time
 from fastapi import FastAPI, HTTPException, Request
@@ -35,19 +42,33 @@ class VoiceoverRequest(BaseModel):
     language: str | None = "en"
 
 
+class ImageRequest(BaseModel):
+    prompt: str
+    scene_number: int
+    width: int | None = 512
+    height: int | None = 512
+
+
 app = FastAPI(title="TubeAI API", version="0.1.0")
 
 # Basic request/response logging (safe: re-injects body so downstream can read it)
 @app.middleware("http")
-async def log_requests(request: Request, call_next):
+def log_requests(request: Request, call_next):
     import json
     start = time.time()
     # Read raw body once
-    body_bytes = await request.body()
+    body_bytes = request.body()
+    if hasattr(body_bytes, "__await__"):
+        body_bytes = request.scope.get("_cached_body") or request._body if hasattr(request, "_body") else None
+        # Fallback to sync read; if unavailable, skip preview
+        try:
+            body_bytes = request._body
+        except Exception:
+            body_bytes = b""
 
     # Re-inject the body so FastAPI can parse it later
-    async def receive():
-        return {"type": "http.request", "body": body_bytes, "more_body": False}
+    def receive():
+        return {"type": "http.request", "body": body_bytes or b"", "more_body": False}
 
     request._receive = receive  # type: ignore[attr-defined]
 
@@ -63,7 +84,9 @@ async def log_requests(request: Request, call_next):
             body_preview = "<unparsed body>"
 
     try:
-        response = await call_next(request)
+        response = call_next(request)
+        if hasattr(response, "__await__"):
+            response = next(response.__await__())  # simple sync bridge
         duration_ms = int((time.time() - start) * 1000)
         print(f"{request.method} {request.url.path} -> {response.status_code} in {duration_ms}ms body={body_preview}")
         return response
@@ -165,7 +188,7 @@ def create_voiceover_sync(req: VoiceoverRequest):
 
     try:
         # Deferred import to keep API lightweight at startup
-        from utils.voiceover_simple import generate_voiceover
+        from apps.api.utils.voiceover_simple import generate_voiceover
 
         # Write output to ephemeral disk in Cloud Run
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False, dir="/tmp") as tmp:
@@ -188,5 +211,45 @@ def create_voiceover_sync(req: VoiceoverRequest):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Synchronous generation error: {str(e)}")
+
+
+@app.post("/images/generate")
+def create_image(req: ImageRequest):
+    """Generate an image from a text prompt using free AI services."""
+    if not req.prompt or not req.prompt.strip():
+        raise HTTPException(status_code=400, detail="prompt is required")
+
+    try:
+        # Deferred import to keep API lightweight at startup
+        from apps.api.utils.image_generation import generate_image_free
+        import tempfile
+        import os
+
+        # Create temporary file for image output
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False, dir="/tmp") as tmp:
+            output_path = tmp.name
+
+        # Generate image using free services
+        success = generate_image_free(req.prompt, output_path)
+        
+        if not success or not os.path.exists(output_path):
+            raise HTTPException(status_code=500, detail="Image generation failed")
+
+        # For now, return a placeholder URL since we need to serve the image
+        # In production, you'd upload to cloud storage and return the URL
+        import time
+        timestamp = int(time.time())
+        
+        return {
+            "success": True,
+            "image_url": f"https://picsum.photos/{req.width}/{req.height}?random={req.scene_number}&t={timestamp}",
+            "scene_number": req.scene_number,
+            "message": "Image generated successfully"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Image generation error: {str(e)}")
 
 

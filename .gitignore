@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pyc
+*.pdb
+*.egg-info/
+*.eggs/
+*.pytest_cache/
+
+# Virtual envs
+.venv/
+venv/
+ENV/
+
+# MacOS
+.DS_Store
+
+# Node/Next.js (web)
+apps/web/.next/
+apps/web/node_modules/
+
+# Env files
+.env.bak
+.env.local
+apps/web/.env.local

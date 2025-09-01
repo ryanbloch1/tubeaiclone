@@ -18,17 +18,18 @@ export async function generateVoiceoverSync(script: string, filename?: string): 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 60_000);
   try {
-    const res = await fetch(`${API_BASE}/voiceovers/sync`, {
+    // Only call local Next.js TTS route (prefers ElevenLabs if configured, falls back to HF)
+    const resp = await fetch(`/api/voiceover/generate`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ script, output_filename: filename || "voiceover.wav" }),
+      body: JSON.stringify({ script, filename: filename || "voiceover.wav" }),
       signal: controller.signal,
     });
-    if (!res.ok) {
-      const errText = await res.text().catch(() => "");
-      throw new Error(`Sync generation failed: ${res.status} ${errText}`);
+    if (!resp.ok) {
+      const errText = await resp.text().catch(() => "");
+      throw new Error(`Sync generation failed: ${resp.status} ${errText}`);
     }
-    return res.blob();
+    return resp.blob();
   } finally {
     clearTimeout(timeoutId);
   }

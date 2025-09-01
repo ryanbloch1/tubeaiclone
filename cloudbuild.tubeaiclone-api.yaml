@@ -1,0 +1,5 @@
+steps:
+- name: "gcr.io/cloud-builders/docker"
+  args: ["build", "-f", "Dockerfile.api-simple", "-t", "us-central1-docker.pkg.dev/tube-ai-testing/tubeaiclone/api-simple:latest", "."]
+images:
+- "us-central1-docker.pkg.dev/tube-ai-testing/tubeaiclone/api-simple:latest"
