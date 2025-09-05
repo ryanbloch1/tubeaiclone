@@ -9,7 +9,7 @@ except Exception:
 import tempfile
 import time
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 import redis
 import rq
@@ -51,49 +51,11 @@ class ImageRequest(BaseModel):
 
 app = FastAPI(title="TubeAI API", version="0.1.0")
 
-# Basic request/response logging (safe: re-injects body so downstream can read it)
-@app.middleware("http")
-def log_requests(request: Request, call_next):
-    import json
-    start = time.time()
-    # Read raw body once
-    body_bytes = request.body()
-    if hasattr(body_bytes, "__await__"):
-        body_bytes = request.scope.get("_cached_body") or request._body if hasattr(request, "_body") else None
-        # Fallback to sync read; if unavailable, skip preview
-        try:
-            body_bytes = request._body
-        except Exception:
-            body_bytes = b""
-
-    # Re-inject the body so FastAPI can parse it later
-    def receive():
-        return {"type": "http.request", "body": body_bytes or b"", "more_body": False}
-
-    request._receive = receive  # type: ignore[attr-defined]
-
-    body_preview = ""
-    if body_bytes and request.method in ("POST", "PUT", "PATCH"):
-        try:
-            data = json.loads(body_bytes.decode("utf-8"))
-            if isinstance(data, dict) and "script" in data:
-                s = data.get("script") or ""
-                data["script"] = s[:200] + ("..." if len(s) > 200 else "")
-            body_preview = str(data)
-        except Exception:
-            body_preview = "<unparsed body>"
-
-    try:
-        response = call_next(request)
-        if hasattr(response, "__await__"):
-            response = next(response.__await__())  # simple sync bridge
-        duration_ms = int((time.time() - start) * 1000)
-        print(f"{request.method} {request.url.path} -> {response.status_code} in {duration_ms}ms body={body_preview}")
-        return response
-    except Exception as e:
-        duration_ms = int((time.time() - start) * 1000)
-        print(f"{request.method} {request.url.path} -> ERROR in {duration_ms}ms error={e}")
-        raise
+# Basic request/response logging (disabled for now)
+# @app.middleware("http")
+# def log_requests(request: Request, call_next):
+#     # Disabled to fix middleware issues
+#     return call_next(request)
 
 # CORS for local web app and typical dev ports
 from fastapi.middleware.cors import CORSMiddleware
@@ -252,4 +214,68 @@ def create_image(req: ImageRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Image generation error: {str(e)}")
 
+
+# ---------- Local Stable Diffusion (Diffusers) generation ----------
+class SDImageRequest(BaseModel):
+    prompt: str
+    scene_number: int | None = None
+    width: int | None = 512
+    height: int | None = 512
+    model_id: str | None = None  # override default
+    num_inference_steps: int | None = 30
+    guidance_scale: float | None = 7.5
+
+
+@app.post("/images/sd/generate")
+def generate_image_sd(req: SDImageRequest):
+    if not req.prompt or not req.prompt.strip():
+        raise HTTPException(status_code=400, detail="prompt is required")
+
+    try:
+        # Deferred imports to keep API startup light
+        import torch
+        from diffusers import StableDiffusionPipeline
+        import base64
+        import io
+        from PIL import Image
+
+        model_default = os.getenv("IMAGE_SD_MODEL", "stabilityai/stable-diffusion-2-1-base")
+        model_id = req.model_id or model_default
+
+        # Prefer MPS on Apple Silicon if available
+        use_mps = hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
+        dtype = torch.float16 if use_mps else torch.float32
+        device = "mps" if use_mps else "cpu"
+
+        pipe = StableDiffusionPipeline.from_pretrained(model_id, torch_dtype=dtype)
+        pipe = pipe.to(device)
+
+        steps = req.num_inference_steps or 30
+        guidance = req.guidance_scale or 7.5
+
+        image: Image.Image = pipe(
+            req.prompt,
+            num_inference_steps=steps,
+            guidance_scale=guidance,
+            height=req.height or 512,
+            width=req.width or 512,
+        ).images[0]
+
+        buf = io.BytesIO()
+        image.save(buf, format="PNG")
+        buf.seek(0)
+        b64 = base64.b64encode(buf.read()).decode("utf-8")
+        data_url = f"data:image/png;base64,{b64}"
+
+        return JSONResponse(
+            {
+                "success": True,
+                "image_url": data_url,
+                "scene_number": req.scene_number or 0,
+            }
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"SD generation error: {str(e)}")
 

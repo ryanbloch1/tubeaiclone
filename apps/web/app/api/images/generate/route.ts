@@ -17,7 +17,33 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Direct Hugging Face call (no FastAPI hop)
+    const useLocalSd = process.env.USE_LOCAL_SD === 'true';
+    if (useLocalSd) {
+      const apiBase = process.env.API_BASE || process.env.NEXT_PUBLIC_API_BASE || 'http://127.0.0.1:8000';
+      const sdResp = await fetch(`${apiBase}/images/sd/generate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: parsed.prompt,
+          scene_number: parsed.scene_number,
+          width: 512,
+          height: 512
+        })
+      });
+
+      if (!sdResp.ok) {
+        throw new Error(`Local SD error: ${sdResp.status}`);
+      }
+
+      const json = await sdResp.json();
+      return NextResponse.json({
+        success: true,
+        image_url: json.image_url,
+        scene_number: parsed.scene_number
+      });
+    }
+
+    // Default: Hugging Face Inference API
     const hfToken = process.env.HF_TOKEN;
     const hfModel = process.env.HF_IMAGE_MODEL;
     if (!hfToken || !hfModel) {
