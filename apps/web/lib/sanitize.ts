@@ -27,8 +27,36 @@ export function sanitizeScriptForVoiceover(input: string): string {
     // Remove plain timestamps like 0:00-0:30 (without parentheses)
     line = line.replace(/\b\d{1,2}:\d{2}\s*-\s*\d{1,2}:\d{2}\b/g, "");
 
-    // Remove bracketed tags like [Music], [SFX], [beat]
-    line = line.replace(/\[[^\]]+\]/g, "");
+    // Handle bracketed content: keep narration, drop pure visual/stage directions
+    // Examples to KEEP: [Voiceover: "..."] [A narrator says: '...'] [Narration: ...]
+    // Strategy: for each [ ... ] block
+    //  - if contains voiceover/narrator/narration keywords, extract quoted text if present; otherwise take text after ':'
+    //  - else drop the block
+    line = line.replace(/\[[^\]]+\]/g, (block) => {
+      const inner = block.slice(1, -1); // remove [ ]
+      const lowered = inner.toLowerCase();
+
+      const isNarration = /(voice\s*over|voiceover|narrator|narration|voice over|the narrator says|a narrator says|voice:|narrator:)/i.test(inner);
+      if (!isNarration) {
+        return ""; // drop pure visuals like [Music], [SFX], camera directions, etc.
+      }
+
+      // Try to extract quoted content first
+      const quoted = inner.match(/["']([^"']+)["']/);
+      if (quoted && quoted[1]) {
+        return ` ${quoted[1]} `;
+      }
+
+      // Otherwise, keep text after the first ':' if any
+      const colonIdx = inner.indexOf(":");
+      if (colonIdx >= 0 && colonIdx < inner.length - 1) {
+        const after = inner.slice(colonIdx + 1).trim();
+        return after ? ` ${after} ` : "";
+      }
+
+      // Fallback: if it contains the keywords but no quotes/colon, keep the inner as narration
+      return ` ${inner} `;
+    });
 
     // Remove parenthesized stage directions if the whole line is one
     const trimmed = line.trim();

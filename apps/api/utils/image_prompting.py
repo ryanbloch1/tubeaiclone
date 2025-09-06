@@ -1,5 +1,6 @@
 """Image prompting module: generates image prompts for each scene in the script."""
 
+
 def generate_image_prompts(script, image_count=10):
     """
     Generate image prompts for each scene in the script.

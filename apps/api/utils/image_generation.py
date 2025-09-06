@@ -1,11 +1,11 @@
 """Hugging Face image generation helpers used by the FastAPI endpoint."""
 
 import os
-from typing import Optional
 
 # All scene parsing/prompt helpers removed – frontend handles this now.
 
-def generate_image_huggingface(prompt: str, output_path: str, api_key: Optional[str] = None) -> bool:
+
+def generate_image_huggingface(prompt: str, output_path: str, api_key: str | None = None) -> bool:
     """
     Generate an image using ONLY the Hugging Face Inference Providers API
     exactly as requested (InferenceClient with provider + model).
@@ -30,8 +30,10 @@ def generate_image_huggingface(prompt: str, output_path: str, api_key: Optional[
         print(f"Hugging Face InferenceClient error: {e}")
         return False
 
+
 def create_mock_image(*args, **kwargs) -> bool:  # retained only to avoid import churn
     return False
+
 
 def generate_image_free(prompt: str, output_path: str) -> bool:
     """
@@ -40,12 +42,15 @@ def generate_image_free(prompt: str, output_path: str) -> bool:
     print("Using Hugging Face Inference Providers…")
     return generate_image_huggingface(prompt, output_path)
 
+
 def generate_images_for_script(*args, **kwargs):  # legacy alias kept to avoid import errors
     return []
+
 
 def generate_images_huggingface_only(script: str, output_dir: str = "output/images") -> List[str]:
     # Backwards compatible alias
     return generate_images_for_script(script, output_dir)
+
 
 def get_available_services():
     return [{"name": "Hugging Face Inference Providers"}]

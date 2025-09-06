@@ -1,22 +1,26 @@
 import os
+
 try:
     # Load environment variables from a .env file (project root)
-    from dotenv import load_dotenv, find_dotenv
+    from dotenv import find_dotenv, load_dotenv
+
     # Use override=True so .env values replace any empty pre-set envs
     load_dotenv(find_dotenv(), override=True)
 except Exception:
     pass
 import tempfile
 import time
-from fastapi import FastAPI, HTTPException, Request
+
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
+from google.cloud import storage
 from pydantic import BaseModel
 import redis
 import rq
-from google.cloud import storage
 
 REDIS_URL = os.getenv("REDIS_URL") or ""
 QUEUE_NAME = os.getenv("QUEUE_NAME", "voiceover_queue")
+
 
 def get_redis_connection():
     """Get Redis connection with retry logic."""
@@ -30,6 +34,7 @@ def get_redis_connection():
     except Exception as e:
         print(f"Redis connection failed: {e}")
         return None, None
+
 
 # Initialize global connection
 rconn, queue = get_redis_connection()
@@ -88,16 +93,18 @@ def health():
 @app.post("/voiceovers")
 def create_voiceover(req: VoiceoverRequest):
     global rconn, queue
-    
+
     if not req.script or not req.script.strip():
         raise HTTPException(status_code=400, detail="script is required")
-    
+
     # Retry Redis connection if needed
     if not queue:
         rconn, queue = get_redis_connection()
         if not queue:
-            raise HTTPException(status_code=503, detail="Redis/Queue is not available. Please try again.")
-    
+            raise HTTPException(
+                status_code=503, detail="Redis/Queue is not available. Please try again."
+            )
+
     try:
         job = queue.enqueue(
             "apps.worker.tasks.generate_voiceover_job",
@@ -132,7 +139,7 @@ def voiceover_status(job_id: str):
                 bucket = client.bucket(bucket_name)
                 blob_path = os.path.basename(result["output_path"]) or "voiceover.wav"
                 blob = bucket.blob(f"voiceovers/{blob_path}")
-                blob.upload_from_filename(result["output_path"]) 
+                blob.upload_from_filename(result["output_path"])
                 url = blob.generate_signed_url(version="v4", expiration=3600, method="GET")
                 resp["signed_url"] = url
             except Exception as e:
@@ -183,9 +190,10 @@ def create_image(req: ImageRequest):
 
     try:
         # Deferred import to keep API lightweight at startup
-        from apps.api.utils.image_generation import generate_image_free
-        import tempfile
         import os
+        import tempfile
+
+        from apps.api.utils.image_generation import generate_image_free
 
         # Create temporary file for image output
         with tempfile.NamedTemporaryFile(suffix=".png", delete=False, dir="/tmp") as tmp:
@@ -193,20 +201,21 @@ def create_image(req: ImageRequest):
 
         # Generate image using free services
         success = generate_image_free(req.prompt, output_path)
-        
+
         if not success or not os.path.exists(output_path):
             raise HTTPException(status_code=500, detail="Image generation failed")
 
         # For now, return a placeholder URL since we need to serve the image
         # In production, you'd upload to cloud storage and return the URL
         import time
+
         timestamp = int(time.time())
-        
+
         return {
             "success": True,
             "image_url": f"https://picsum.photos/{req.width}/{req.height}?random={req.scene_number}&t={timestamp}",
             "scene_number": req.scene_number,
-            "message": "Image generated successfully"
+            "message": "Image generated successfully",
         }
 
     except HTTPException:
@@ -233,11 +242,12 @@ def generate_image_sd(req: SDImageRequest):
 
     try:
         # Deferred imports to keep API startup light
-        import torch
-        from diffusers import StableDiffusionPipeline
         import base64
         import io
+
+        from diffusers import StableDiffusionPipeline
         from PIL import Image
+        import torch
 
         model_default = os.getenv("IMAGE_SD_MODEL", "stabilityai/stable-diffusion-2-1-base")
         model_id = req.model_id or model_default
@@ -278,4 +288,3 @@ def generate_image_sd(req: SDImageRequest):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"SD generation error: {str(e)}")
-

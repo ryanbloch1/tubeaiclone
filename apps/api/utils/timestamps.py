@@ -1,5 +1,6 @@
 """Timestamps module: calculates timestamps for each image/scene based on audio duration."""
 
+
 def calculate_timestamps(audio_duration, image_count):
     """
     Calculate start/end timestamps for each image/scene.
@@ -11,4 +12,4 @@ def calculate_timestamps(audio_duration, image_count):
     """
     # TODO: Implement timestamp calculation
     segment = audio_duration / image_count
-    return [(i*segment, (i+1)*segment) for i in range(image_count)]
+    return [(i * segment, (i + 1) * segment) for i in range(image_count)]

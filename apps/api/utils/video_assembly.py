@@ -1,5 +1,6 @@
 """Video assembly module: assembles images and voiceover into a video file."""
 
+
 def generate_synced_video(image_paths, audio_path, timestamps, output_path):
     """
     Assemble images and voiceover into a video file using MoviePy or FFmpeg.

@@ -3,41 +3,42 @@ Simplified voiceover generation for production deployment.
 Uses only reliable TTS methods that work in containers.
 """
 
-import os
-import tempfile
 import logging
-import subprocess
-import json
-import requests
-import shutil
 import math
-import wave
+import os
+import shutil
 import struct
-from pathlib import Path
+import subprocess
+import tempfile
+import wave
 
+import requests
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-def generate_voiceover(script: str, voice_sample_path: str | None = None, output_path: str | None = None) -> str:
+
+def generate_voiceover(
+    script: str, voice_sample_path: str | None = None, output_path: str | None = None
+) -> str:
     """
     Generate voiceover using the most reliable method available.
-    
+
     Args:
         script: Text to convert to speech
         voice_sample_path: Unused. Present for API compatibility only.
         output_path: Output file path (optional, will create temp file if not provided)
-    
+
     Returns:
         Path to generated audio file
     """
-    
+
     if not output_path:
         # Create a temporary file for output
-        with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp:
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
             output_path = tmp.name
-    
+
     # Reference voice_sample_path to satisfy linters; not used in simplified path
     if voice_sample_path:
         _ = voice_sample_path
@@ -81,24 +82,38 @@ def _command_exists(command: str) -> bool:
 
 def _generate_macos_say(script: str, output_path: str) -> str:
     """Use macOS 'say' to synthesize TTS. Converts to WAV using ffmpeg if available."""
-    if not _command_exists('say'):
+    if not _command_exists("say"):
         raise RuntimeError("'say' not found on PATH")
 
-    aiff_path = output_path.replace('.wav', '.aiff')
+    aiff_path = output_path.replace(".wav", ".aiff")
     voice_name = os.getenv("VOICE_NAME")
     voice_rate = os.getenv("VOICE_RATE")  # words per minute
-    cmd = ['say']
+    cmd = ["say"]
     if voice_name:
-        cmd += ['-v', voice_name]
+        cmd += ["-v", voice_name]
     if voice_rate:
-        cmd += ['-r', voice_rate]
-    cmd += ['-o', aiff_path, script]
+        cmd += ["-r", voice_rate]
+    cmd += ["-o", aiff_path, script]
     subprocess.run(cmd, check=True, capture_output=True, timeout=120)
 
-    if _command_exists('ffmpeg'):
-        subprocess.run([
-            'ffmpeg', '-y', '-i', aiff_path, '-ar', '22050', '-ac', '1', '-sample_fmt', 's16', output_path
-        ], check=True, capture_output=True)
+    if _command_exists("ffmpeg"):
+        subprocess.run(
+            [
+                "ffmpeg",
+                "-y",
+                "-i",
+                aiff_path,
+                "-ar",
+                "22050",
+                "-ac",
+                "1",
+                "-sample_fmt",
+                "s16",
+                output_path,
+            ],
+            check=True,
+            capture_output=True,
+        )
         os.unlink(aiff_path)
         return output_path
 
@@ -118,7 +133,7 @@ def _generate_elevenlabs_tts(script: str, output_path: str) -> str:
     output_format = os.getenv("ELEVENLABS_OUTPUT_FORMAT", "mp3_44100_128")
 
     if not output_path:
-        with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp:
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
             output_path = tmp.name
 
     logger.info(
@@ -155,17 +170,31 @@ def _generate_elevenlabs_tts(script: str, output_path: str) -> str:
             f"headers: {dict(resp.headers)}, status_code: {resp.status_code}, body: {body}"
         )
 
-    mp3_path = output_path.replace('.wav', '.mp3')
-    with open(mp3_path, 'wb') as f:
+    mp3_path = output_path.replace(".wav", ".mp3")
+    with open(mp3_path, "wb") as f:
         for chunk in resp.iter_content(chunk_size=8192):
             if chunk:
                 f.write(chunk)
 
-    if _command_exists('ffmpeg'):
+    if _command_exists("ffmpeg"):
         try:
-            subprocess.run([
-                'ffmpeg', '-y', '-i', mp3_path, '-ar', '22050', '-ac', '1', '-sample_fmt', 's16', output_path
-            ], check=True, capture_output=True)
+            subprocess.run(
+                [
+                    "ffmpeg",
+                    "-y",
+                    "-i",
+                    mp3_path,
+                    "-ar",
+                    "22050",
+                    "-ac",
+                    "1",
+                    "-sample_fmt",
+                    "s16",
+                    output_path,
+                ],
+                check=True,
+                capture_output=True,
+            )
             os.unlink(mp3_path)
         except Exception:
             os.rename(mp3_path, output_path)
@@ -185,17 +214,18 @@ def _generate_placeholder_tone(script: str, output_path: str) -> str:
     amplitude = 0.3
 
     num_frames = int(duration_sec * sample_rate)
-    with wave.open(output_path, 'w') as wav:
+    with wave.open(output_path, "w") as wav:
         wav.setnchannels(1)
         wav.setsampwidth(2)  # 16-bit
         wav.setframerate(sample_rate)
         for i in range(num_frames):
             t = i / sample_rate
             sample = amplitude * math.sin(2 * math.pi * frequency_hz * t)
-            wav.writeframes(struct.pack('<h', int(sample * 32767)))
+            wav.writeframes(struct.pack("<h", int(sample * 32767)))
 
     logger.info("✅ Generated placeholder tone WAV: %s", output_path)
     return output_path
+
 
 # For testing
 if __name__ == "__main__":

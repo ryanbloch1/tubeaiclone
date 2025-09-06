@@ -1,32 +1,33 @@
 "use client";
-import React, { useState, useEffect, useCallback, useMemo } from "react";
-import { useRouter } from "next/navigation";
+import React, { useMemo } from "react";
 import { sanitizeScriptForVoiceover } from "@/lib/sanitize";
 import { TitleBar } from "./ui/TitleBar";
 import { WordCountModal } from "./ui/WordCountModal";
 import { ContextModal } from "./ui/ContextModal";
 import { StyleModal } from "./ui/StyleModal";
+import { useVideoStore } from "@/lib/store";
 
 type ScriptResponse = { text?: string; error?: string; mock?: boolean };
 
 export default function ScriptPage() {
-  const [topic, setTopic] = useState("");
-  const [style, setStyle] = useState("");
-  const [mode, setMode] = useState<"script" | "outline">("script");
-  const [temperature, setTemperature] = useState<number>(0.7);
-  const [wordCount, setWordCount] = useState<number>(500);
-  const [selection, setSelection] = useState<string>("");
-  const [showWordModal, setShowWordModal] = useState(false);
-  const [showContextModal, setShowContextModal] = useState(false);
-  const [showStyleModal, setShowStyleModal] = useState(false);
-  const [extraContext, setExtraContext] = useState("");
+  const setScriptState = useVideoStore(s => s.setScriptState);
+  const topic = useVideoStore(s => s.topic);
+  const style = useVideoStore(s => s.style);
+  const mode = useVideoStore(s => s.mode);
+  const temperature = useVideoStore(s => s.temperature);
+  const wordCount = useVideoStore(s => s.wordCount);
+  const selection = useVideoStore(s => s.selection);
+  const extraContext = useVideoStore(s => s.extraContext);
+  const imageCount = useVideoStore(s => s.imageCount);
+  const videoLength = useVideoStore(s => s.videoLength);
+  const editableScript = useVideoStore(s => s.editableScript);
 
-  const [imageCount, setImageCount] = useState(10);
-  const [videoLength, setVideoLength] = useState<string>("1:00");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<ScriptResponse | null>(null);
-  const [editableScript, setEditableScript] = useState<string>("");
+  const [showWordModal, setShowWordModal] = React.useState(false);
+  const [showContextModal, setShowContextModal] = React.useState(false);
+  const [showStyleModal, setShowStyleModal] = React.useState(false);
+  const [loading, setLoading] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+  const [result, setResult] = React.useState<ScriptResponse | null>(null);
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -52,7 +53,7 @@ export default function ScriptPage() {
       const data = (await res.json()) as ScriptResponse;
       if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
       setResult(data);
-      setEditableScript(data.text || "");
+      setScriptState({ editableScript: data.text || "" });
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed to generate";
       setError(msg);
@@ -61,36 +62,41 @@ export default function ScriptPage() {
     }
   };
 
-  useEffect(() => {
-    // Simple image count based on video length
+  React.useEffect(() => {
     const lengthToImages: { [key: string]: number } = {
       "0:30": 5,
       "1:00": 10,
       "2:00": 20,
       "3:00": 30
     };
-    setImageCount(lengthToImages[videoLength] || 10);
-  }, [videoLength]);
+    const next = lengthToImages[videoLength] || 10;
+    if (next !== imageCount) setScriptState({ imageCount: next });
+  }, [videoLength, imageCount, setScriptState]);
 
   const sanitizedScript = useMemo(() => sanitizeScriptForVoiceover(editableScript), [editableScript]);
 
   const goToVoiceover = () => {
-    try {
-      localStorage.setItem("tubeai_script", sanitizedScript); // For voiceover (sanitized)
-      localStorage.setItem("tubeai_original_script", editableScript); // For images (original with scenes)
-      localStorage.setItem("tubeai_from_script", "true"); // Track navigation source
-    } catch {}
     window.location.href = "/voiceover";
   };
 
   return (
     <main className="min-h-screen bg-slate-50">
       <div className="container mx-auto px-4 py-8">
-        <h1 className="text-4xl font-bold text-center mb-8 text-slate-900">Enter Video Title</h1>
+        <div className="flex items-center justify-between mb-8">
+          <button
+            onClick={() => window.location.href = "/"}
+            className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-lg font-medium transition-colors flex items-center space-x-2"
+          >
+            <span>←</span>
+            <span>Back to Home</span>
+          </button>
+          <h1 className="text-4xl font-bold text-slate-900">Enter Video Title</h1>
+          <div className="w-32"></div> {/* Spacer for centering */}
+        </div>
         <form onSubmit={onSubmit} className="max-w-4xl mx-auto space-y-4">
           <TitleBar
             topic={topic}
-            setTopic={setTopic}
+            setTopic={(v: string) => setScriptState({ topic: v })}
             wordCount={wordCount}
             onOpenWordModal={() => setShowWordModal(true)}
             onOpenContextModal={() => setShowContextModal(true)}
@@ -128,7 +134,7 @@ export default function ScriptPage() {
               className="w-full rounded-lg border border-slate-300 p-4 text-slate-900 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-colors resize-none"
               rows={15}
               value={editableScript}
-              onChange={(e) => setEditableScript(e.target.value)}
+              onChange={(e) => setScriptState({ editableScript: e.target.value })}
               placeholder="Your generated script will appear here..."
             />
             
@@ -149,18 +155,18 @@ export default function ScriptPage() {
         open={showWordModal}
         wordCount={wordCount}
         onClose={() => setShowWordModal(false)}
-        onSave={(wc: number) => { setWordCount(wc); setShowWordModal(false); }}
+        onSave={(wc: number) => { setScriptState({ wordCount: wc }); setShowWordModal(false); }}
       />
       <ContextModal
         open={showContextModal}
         value={extraContext}
         onClose={() => setShowContextModal(false)}
-        onSave={(txt: string) => { setExtraContext(txt); setShowContextModal(false); }}
+        onSave={(txt: string) => { setScriptState({ extraContext: txt }); setShowContextModal(false); }}
       />
       <StyleModal
         open={showStyleModal}
         onClose={() => setShowStyleModal(false)}
-        onCreate={(name: string) => { setStyle(name); setShowStyleModal(false); }}
+        onCreate={(name: string) => { setScriptState({ style: name }); setShowStyleModal(false); }}
       />
     </main>
   );
