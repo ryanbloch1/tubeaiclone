@@ -73,6 +73,9 @@ export async function POST(req: NextRequest) {
 
     const approxWords =
       body.word_count && body.word_count > 50 ? body.word_count : undefined;
+    const perSceneWords = approxWords
+      ? Math.max(25, Math.round(approxWords / Math.max(1, imageCount)))
+      : 50;
 
     let prompt = '';
 
@@ -122,16 +125,17 @@ Return only the rewritten text, without any additional commentary or labels.`;
 ${approxWords ? `- Approximate Total Word Count: ${approxWords}\n` : ''}
 
 **CONTENT REQUIREMENTS:**
-1.  **Visual-First Writing:** Every scene must be described primarily through what the viewer *sees* and *experiences visually*. Prioritize imagery over narration.
-2.  **Narrative Flow:** Ensure a logical and engaging progression from one scene to the next (e.g., Introduction -> Problem -> Discovery -> Solution -> Conclusion).
-3.  **Depth:** Explore the topic substantively. Do not just repeat the title; provide valuable information and storytelling.
+1.  **Narration-First:** Provide substantive, speakable narration for each scene (2–4 sentences, ~${perSceneWords} words). Put ONLY speakable text in the "Content/Narration" field—no camera directions or stage notes there.
+2.  **Concise Visuals:** Keep the "Visuals" line to one short sentence describing the key shot(s).
+3.  **Narrative Flow:** Ensure a logical and engaging progression from one scene to the next (e.g., Introduction -> Problem -> Discovery -> Solution -> Conclusion).
+4.  **Depth:** Explore the topic substantively. Do not just repeat the title; provide valuable information and storytelling.
 
 **SCENE STRUCTURE:**
 For each of the ${imageCount} scenes, provide the following structure:
 ---
 Scene [Number] ([Start Time]-[End Time]): [A catchy, 3-5 word title for the scene]
-**Visuals:** [A rich, concise description of the primary visual elements. Describe locations, actions, objects, and atmosphere as if instructing a video editor.]
-**Content/Narration (Optional):** [If needed, a brief sample of what the host might say during this visual. Keep it short and tied to the visuals.]
+**Content/Narration:** [2–4 sentences of speakable narration (~${perSceneWords} words), clear, conversational, and free of stage directions.]
+**Visuals:** [One brief sentence describing the key shot(s).]
 ---
 
 **TOPIC:** ${topic}
