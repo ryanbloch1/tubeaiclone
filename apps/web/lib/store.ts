@@ -22,7 +22,17 @@ type ScriptState = {
   imageCount: number;
   videoLength: string;
   editableScript: string;
-  setScriptState: (partial: Partial<Omit<ScriptState, "setScriptState">>) => void;
+  // Generic slice setter for ScriptState.
+  // Accepts either:
+  // - an object with only the fields you want to update
+  // - a function that receives current ScriptState and returns a partial update
+  // We use Partial<Omit<...>> to: (1) allow updating only some fields, and
+  // (2) prevent accidentally trying to update the setter itself.
+  setScriptState: (
+    partial:
+      | Partial<Omit<ScriptState, "setScriptState">>
+      | ((state: ScriptState) => Partial<Omit<ScriptState, "setScriptState">>)
+  ) => void;
 };
 
 // Voiceover slice
@@ -32,7 +42,12 @@ type VoiceoverState = {
   audioUrl: string | null;
   audioDataUrl?: string | null;
   cameFromScript: boolean;
-  setVoiceoverState: (partial: Partial<Omit<VoiceoverState, "setVoiceoverState">>) => void;
+  // Same generic setter pattern for the Voiceover slice.
+  setVoiceoverState: (
+    partial:
+      | Partial<Omit<VoiceoverState, "setVoiceoverState">>
+      | ((state: VoiceoverState) => Partial<Omit<VoiceoverState, "setVoiceoverState">>)
+  ) => void;
 };
 
 // Types reused by Images slice
@@ -58,7 +73,12 @@ type ImagesState = {
   generating: boolean;
   currentScene: number | null;
   cameFromVoiceover: boolean;
-  setImagesState: (partial: Partial<Omit<ImagesState, "setImagesState">>) => void;
+  // Same generic setter pattern for the Images slice.
+  setImagesState: (
+    partial:
+      | Partial<Omit<ImagesState, "setImagesState">>
+      | ((state: ImagesState) => Partial<Omit<ImagesState, "setImagesState">>)
+  ) => void;
 };
 
 export type StoreState = {
@@ -99,17 +119,41 @@ const initialState: StoreState = {
 
 export const useVideoStore = create<StoreState>()(
   persist(
-    (set, get) => ({
+    (set) => ({
       ...initialState,
       setHydrated: (value) => set({ hydrated: value }),
-      setScriptState: (partial) => set((state) => ({ ...state, ...partial })),
-      setVoiceoverState: (partial) => set((state) => ({ ...state, ...partial })),
-      setImagesState: (partial) => set((state) => ({ ...state, ...partial }))
+      // Apply object or functional updates to ScriptState.
+      // If a function is provided, we cast the big store state down to the
+      // specific slice type so the updater gets correct intellisense/types.
+      setScriptState: (partial) =>
+        set((state) => ({
+          ...state,
+          ...(typeof partial === "function"
+            ? (partial as (s: ScriptState) => Partial<Omit<ScriptState, "setScriptState">>)(state as unknown as ScriptState)
+            : partial),
+        })),
+      // Same pattern for VoiceoverState.
+      setVoiceoverState: (partial) =>
+        set((state) => ({
+          ...state,
+          ...(typeof partial === "function"
+            ? (partial as (s: VoiceoverState) => Partial<Omit<VoiceoverState, "setVoiceoverState">>)(state as unknown as VoiceoverState)
+            : partial),
+        })),
+      // Same pattern for ImagesState.
+      setImagesState: (partial) =>
+        set((state) => ({
+          ...state,
+          ...(typeof partial === "function"
+            ? (partial as (s: ImagesState) => Partial<Omit<ImagesState, "setImagesState">>)(state as unknown as ImagesState)
+            : partial),
+        })),
     }),
     {
       name: "tubeai_store",
       storage: createJSONStorage(() => localStorage),
-      // Persist only the user-facing slices; omit functions and flags
+      // Persist only the user-facing slices; omit functions and transient flags.
+      // This reduces localStorage bloat and prevents restoring ephemeral UI state.
       partialize: (state) => ({
         topic: state.topic,
         style: state.style,
@@ -127,12 +171,11 @@ export const useVideoStore = create<StoreState>()(
         cameFromScript: state.cameFromScript,
         scenes: state.scenes,
         images: state.images,
-        generating: state.generating,
-        currentScene: state.currentScene,
         cameFromVoiceover: state.cameFromVoiceover
       }),
-      onRehydrateStorage: () => (state, error) => {
-        // Mark store as ready after rehydration completes
+      onRehydrateStorage: () => (state) => {
+        // Mark store as ready after rehydration completes.
+        // Components can check `hydrated` to avoid reading before persistence restores.
         if (state) {
           state.setHydrated(true);
         }

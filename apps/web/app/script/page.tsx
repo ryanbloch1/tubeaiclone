@@ -1,6 +1,6 @@
 "use client";
-import React, { useMemo } from "react";
-import { sanitizeScriptForVoiceover } from "@/lib/sanitize";
+import React from "react";
+import { useRouter } from "next/navigation";
 import { TitleBar } from "./ui/TitleBar";
 import { WordCountModal } from "./ui/WordCountModal";
 import { ContextModal } from "./ui/ContextModal";
@@ -10,6 +10,7 @@ import { useVideoStore } from "@/lib/store";
 type ScriptResponse = { text?: string; error?: string; mock?: boolean };
 
 export default function ScriptPage() {
+  const router = useRouter();
   const setScriptState = useVideoStore(s => s.setScriptState);
   const topic = useVideoStore(s => s.topic);
   const style = useVideoStore(s => s.style);
@@ -28,6 +29,7 @@ export default function ScriptPage() {
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [result, setResult] = React.useState<ScriptResponse | null>(null);
+  const goingToVoiceoverRef = React.useRef(false);
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -73,10 +75,20 @@ export default function ScriptPage() {
     if (next !== imageCount) setScriptState({ imageCount: next });
   }, [videoLength, imageCount, setScriptState]);
 
-  const sanitizedScript = useMemo(() => sanitizeScriptForVoiceover(editableScript), [editableScript]);
+  // Clear script when navigating away from this page (but not when going to voiceover)
+  React.useEffect(() => {
+    return () => {
+      // Only clear if we're not going to voiceover page
+      if (!goingToVoiceoverRef.current) {
+        setScriptState({ editableScript: "" });
+      }
+    };
+  }, [setScriptState]);
+
 
   const goToVoiceover = () => {
-    window.location.href = "/voiceover";
+    goingToVoiceoverRef.current = true;
+    router.push("/voiceover");
   };
 
   return (
@@ -84,7 +96,7 @@ export default function ScriptPage() {
       <div className="container mx-auto px-4 py-8">
         <div className="flex items-center justify-between mb-8">
           <button
-            onClick={() => window.location.href = "/"}
+            onClick={() => router.push("/")}
             className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-lg font-medium transition-colors flex items-center space-x-2"
           >
             <span>←</span>
@@ -131,7 +143,7 @@ export default function ScriptPage() {
               Edit script
             </label>
             <textarea
-              className="w-full rounded-lg border border-slate-300 p-4 text-slate-900 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-colors resize-none"
+              className="w-full rounded-lg border border-slate-300 p-4 text-white bg-slate-800 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-colors resize-none"
               rows={15}
               value={editableScript}
               onChange={(e) => setScriptState({ editableScript: e.target.value })}

@@ -4,8 +4,10 @@ import { sanitizeScriptForVoiceover } from '@/lib/sanitize';
 import { useVideoStore } from '@/lib/store';
 import { useHydrated } from '@/lib/useHydrated';
 import React, { useMemo } from 'react';
+import { useRouter } from 'next/navigation';
 
 export default function VoiceoverPage() {
+  const router = useRouter();
   const hydrated = useHydrated();
   const setVoiceoverState = useVideoStore((s) => s.setVoiceoverState);
   const rawScript = useVideoStore((s) => s.editableScript); // use original script text from store
@@ -14,10 +16,13 @@ export default function VoiceoverPage() {
   const cameFromScript = useVideoStore((s) => s.cameFromScript);
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const [hasGeneratedVoiceover, setHasGeneratedVoiceover] = React.useState(false);
 
   // When arriving here, mark that we came from script if there is text
   React.useEffect(() => {
-    if (!hydrated) return;
+    if (!hydrated) {
+      return;
+    }
     if (rawScript && rawScript.trim().length > 0) {
       setVoiceoverState({ cameFromScript: true });
     }
@@ -28,12 +33,20 @@ export default function VoiceoverPage() {
     [rawScript]
   );
   const displayScript = sanitizedScript; // Always show sanitized text in the UI
+
+  // Debug logging (can be removed in production)
+  // React.useEffect(() => {
+  //   console.log('Voiceover page - rawScript:', rawScript);
+  //   console.log('Voiceover page - sanitizedScript:', sanitizedScript);
+  //   console.log('Voiceover page - hydrated:', hydrated);
+  // }, [rawScript, sanitizedScript, hydrated]);
   const audioSrc: string | undefined =
     (audioUrl ?? undefined) || (audioDataUrl ?? undefined);
 
   const onGenerate = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    setHasGeneratedVoiceover(false);
     setVoiceoverState({ audioUrl: null });
     setLoading(true);
     try {
@@ -48,8 +61,13 @@ export default function VoiceoverPage() {
         binary += String.fromCharCode(bytes[i]);
       }
       const base64 = typeof window !== 'undefined' ? window.btoa(binary) : '';
-      const dataUrl = `data:audio/wav;base64,${base64}`;
-      setVoiceoverState({ audioUrl: url, audioDataUrl: dataUrl });
+      const mime = blob.type || 'audio/wav';
+      const dataUrl = `data:${mime};base64,${base64}`;
+      // Store base64 only if it fits typical localStorage limits
+      const maxBytes = 4_500_000; // ~4.5MB safety cap
+      const audioDataUrl = base64.length * 0.75 < maxBytes ? dataUrl : null;
+      setVoiceoverState({ audioUrl: url, audioDataUrl });
+      setHasGeneratedVoiceover(true);
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to generate';
       setError(msg);
@@ -64,7 +82,7 @@ export default function VoiceoverPage() {
         <div className="max-w-4xl mx-auto">
           <div className="flex items-center justify-between mb-8">
             <button
-              onClick={() => (window.location.href = '/script')}
+              onClick={() => router.push('/script')}
               className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-lg font-medium transition-colors flex items-center space-x-2"
             >
               <span>←</span>
@@ -163,7 +181,7 @@ export default function VoiceoverPage() {
             </div>
           )}
 
-          {audioSrc && (
+          {hasGeneratedVoiceover && audioSrc && (
             <div className="bg-white rounded-lg border border-slate-200 p-6 shadow-sm">
               <h3 className="text-lg font-semibold text-slate-900 mb-4 flex items-center">
                 <span className="mr-2">✅</span>
@@ -197,9 +215,7 @@ export default function VoiceoverPage() {
                       <span>Download WAV</span>
                     </a>
                     <button
-                      onClick={() => {
-                        window.location.href = '/images';
-                      }}
+                      onClick={() => router.push('/images')}
                       className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg font-medium transition-colors flex items-center space-x-2"
                     >
                       <span>🎨</span>
