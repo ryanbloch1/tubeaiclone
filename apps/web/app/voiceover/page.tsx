@@ -10,6 +10,7 @@ export default function VoiceoverPage() {
   const router = useRouter();
   const hydrated = useHydrated();
   const setVoiceoverState = useVideoStore((s) => s.setVoiceoverState);
+  const setScriptState = useVideoStore((s) => s.setScriptState);
   const rawScript = useVideoStore((s) => s.editableScript); // use original script text from store
   const audioUrl = useVideoStore((s) => s.audioUrl);
   const audioDataUrl = useVideoStore((s) => s.audioDataUrl);
@@ -17,6 +18,7 @@ export default function VoiceoverPage() {
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [hasGeneratedVoiceover, setHasGeneratedVoiceover] = React.useState(false);
+  const [editedScript, setEditedScript] = React.useState('');
 
   // When arriving here, mark that we came from script if there is text
   React.useEffect(() => {
@@ -28,18 +30,35 @@ export default function VoiceoverPage() {
     }
   }, [hydrated, rawScript, setVoiceoverState]);
 
+  // Note: Do NOT prefill editedScript with raw on load.
+  // Showing sanitized by default avoids confusing unsanitized content on arrival.
+  // Also, do NOT auto-save edits back to store here; only save on explicit action.
+
+  // Handle saving edited script
+  const handleSaveScript = () => {
+    if (editedScript.trim().length > 0) {
+      setScriptState({ editableScript: editedScript });
+    }
+  };
+
+  // Always compute sanitized from the latest raw + any local edits
   const sanitizedScript = useMemo(
-    () => sanitizeScriptForVoiceover(rawScript),
-    [rawScript]
+    () => sanitizeScriptForVoiceover((editedScript || rawScript) || ''),
+    [editedScript, rawScript]
   );
-  const displayScript = sanitizedScript; // Always show sanitized text in the UI
+  // Display sanitized by default; switch to edited text once user types
+  const displayScript = (editedScript.length > 0 ? editedScript : sanitizedScript) || '';
+  
+  // For voiceover generation, always use the sanitized version
+  const scriptForVoiceover = sanitizedScript;
 
   // Debug logging (can be removed in production)
-  // React.useEffect(() => {
-  //   console.log('Voiceover page - rawScript:', rawScript);
-  //   console.log('Voiceover page - sanitizedScript:', sanitizedScript);
-  //   console.log('Voiceover page - hydrated:', hydrated);
-  // }, [rawScript, sanitizedScript, hydrated]);
+  React.useEffect(() => {
+    console.log('Voiceover page - rawScript:', rawScript?.substring(0, 100) + '...');
+    console.log('Voiceover page - editedScript:', editedScript?.substring(0, 100) + '...');
+    console.log('Voiceover page - sanitizedScript:', sanitizedScript?.substring(0, 100) + '...');
+    console.log('Voiceover page - hydrated:', hydrated);
+  }, [rawScript, editedScript, sanitizedScript, hydrated]);
   const audioSrc: string | undefined =
     (audioUrl ?? undefined) || (audioDataUrl ?? undefined);
 
@@ -50,7 +69,7 @@ export default function VoiceoverPage() {
     setVoiceoverState({ audioUrl: null });
     setLoading(true);
     try {
-      const textForTts = sanitizedScript?.trim() ?? '';
+      const textForTts = scriptForVoiceover?.trim() ?? '';
       const blob = await generateVoiceoverSync(textForTts, 'voiceover.wav');
       const url = URL.createObjectURL(blob);
       // Also persist the audio as data URL so it survives reloads/back nav
@@ -110,28 +129,36 @@ export default function VoiceoverPage() {
               <h2 className="text-xl font-semibold text-slate-900">
                 Script Preview
               </h2>
-              <span className="text-sm text-slate-500">
-                {displayScript.length} characters
-              </span>
+              <div className="flex items-center space-x-3">
+                <span className="text-sm text-slate-500">
+                  {displayScript.length} characters
+                </span>
+                <button
+                  type="button"
+                  onClick={handleSaveScript}
+                  className="px-3 py-1 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+                >
+                  Save Script
+                </button>
+              </div>
             </div>
 
             <form onSubmit={onGenerate} className="space-y-6">
               <div>
                 <textarea
-                  className="w-full rounded-lg border border-slate-300 p-4 text-slate-900 bg-slate-50 resize-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-colors"
+                  className="w-full rounded-lg border border-slate-300 p-4 text-slate-900 bg-white resize-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-colors"
                   rows={12}
                   value={displayScript}
-                  readOnly
-                  placeholder="Your script will appear here from the previous step..."
+                  onChange={(e) => setEditedScript(e.target.value)}
+                  placeholder="Type your script here or it will appear from the previous step..."
                 />
                 <p className="text-sm text-slate-500 mt-2">
                   {displayScript.trim().length === 0 ? (
                     <span className="text-red-600">
-                      No narratable text found after sanitizing. Please edit
-                      your script on the previous page to include narration.
+                      No script text found. Type your script above or generate one on the previous page.
                     </span>
                   ) : (
-                    <>This script was loaded from your previous generation. </>
+                    <>You can edit this script directly. The sanitized version will be used for voiceover generation.</>
                   )}
                   <a
                     href="/script"

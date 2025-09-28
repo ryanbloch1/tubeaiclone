@@ -65,11 +65,18 @@ type ImageGeneration = {
   error?: string;
 };
 
+type ScenePrompt = {
+  scene_number: number;
+  prompt: string | null;
+  status: 'loading' | 'ready' | 'error';
+};
+
 // Images slice
 // Derived from the script: parsed scenes + per-scene generation state
 type ImagesState = {
   scenes: Scene[];
   images: ImageGeneration[];
+  scenePrompts: ScenePrompt[];
   generating: boolean;
   currentScene: number | null;
   cameFromVoiceover: boolean;
@@ -111,6 +118,7 @@ const initialState: StoreState = {
   // Images
   scenes: [],
   images: [],
+  scenePrompts: [],
   generating: false,
   currentScene: null,
   cameFromVoiceover: false,
@@ -171,6 +179,7 @@ export const useVideoStore = create<StoreState>()(
         cameFromScript: state.cameFromScript,
         scenes: state.scenes,
         images: state.images,
+        scenePrompts: state.scenePrompts,
         cameFromVoiceover: state.cameFromVoiceover
       }),
       onRehydrateStorage: () => (state) => {

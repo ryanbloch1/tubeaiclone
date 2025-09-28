@@ -31,7 +31,7 @@ export async function POST(request: NextRequest) {
 
     const genAI = new GoogleGenerativeAI(apiKey);
     const model = genAI.getGenerativeModel({
-      model: 'gemini-1.5-flash',
+      model: 'gemini-2.5-flash',
       systemInstruction: `You are an expert at creating detailed, visual prompts for AI image generation. Your job is to convert scene descriptions into compelling image generation prompts that will create high-quality, cinematic images suitable for video content.
 
 Guidelines:

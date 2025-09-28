@@ -6,11 +6,13 @@ import { WordCountModal } from "./ui/WordCountModal";
 import { ContextModal } from "./ui/ContextModal";
 import { StyleModal } from "./ui/StyleModal";
 import { useVideoStore } from "@/lib/store";
+import { useHydrated } from "@/lib/useHydrated";
 
 type ScriptResponse = { text?: string; error?: string; mock?: boolean };
 
 export default function ScriptPage() {
   const router = useRouter();
+  const hydrated = useHydrated();
   const setScriptState = useVideoStore(s => s.setScriptState);
   const topic = useVideoStore(s => s.topic);
   const style = useVideoStore(s => s.style);
@@ -90,6 +92,21 @@ export default function ScriptPage() {
     goingToVoiceoverRef.current = true;
     router.push("/voiceover");
   };
+
+  if (!hydrated) {
+    return (
+      <main className="min-h-screen bg-slate-50">
+        <div className="container mx-auto px-4 py-8">
+          <div className="max-w-4xl mx-auto">
+            <div className="text-center py-8">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
+              <p className="mt-2 text-slate-600">Loading...</p>
+            </div>
+          </div>
+        </div>
+      </main>
+    );
+  }
 
   return (
     <main className="min-h-screen bg-slate-50">

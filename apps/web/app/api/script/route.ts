@@ -66,7 +66,7 @@ export async function POST(req: NextRequest) {
       'You are a professional YouTube scriptwriter and video director. Your task is to create engaging, visual, and well-structured content.';
 
     const model = genAI.getGenerativeModel({
-      model: 'gemini-1.5-flash',
+      model: 'gemini-2.5-flash',
       systemInstruction: baseInstructions,
       generationConfig: { temperature },
     });
