@@ -175,10 +175,17 @@ export const useVideoStore = create<StoreState>()(
         editableScript: state.editableScript,
         rawScript: state.rawScript,
         audioUrl: state.audioUrl,
-        audioDataUrl: state.audioDataUrl,
+        audioDataUrl: state.audioDataUrl, // Keep audio data for voiceover persistence
         cameFromScript: state.cameFromScript,
         scenes: state.scenes,
-        images: state.images,
+        // Only persist image metadata, not the actual image data (base64 is huge)
+        images: state.images.map(img => ({
+          scene_number: img.scene_number,
+          prompt: img.prompt,
+          status: img.status,
+          error: img.error
+          // Explicitly exclude image_url to prevent localStorage quota issues
+        })),
         scenePrompts: state.scenePrompts,
         cameFromVoiceover: state.cameFromVoiceover
       }),

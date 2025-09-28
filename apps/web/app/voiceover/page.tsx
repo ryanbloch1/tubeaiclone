@@ -129,18 +129,6 @@ export default function VoiceoverPage() {
               <h2 className="text-xl font-semibold text-slate-900">
                 Script Preview
               </h2>
-              <div className="flex items-center space-x-3">
-                <span className="text-sm text-slate-500">
-                  {displayScript.length} characters
-                </span>
-                <button
-                  type="button"
-                  onClick={handleSaveScript}
-                  className="px-3 py-1 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
-                >
-                  Save Script
-                </button>
-              </div>
             </div>
 
             <form onSubmit={onGenerate} className="space-y-6">

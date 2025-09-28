@@ -1,5 +1,5 @@
 "use client";
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { useVideoStore } from '@/lib/store';
 import { parseScriptIntoScenes } from '@/lib/images/parseScenes';
 
@@ -8,29 +8,41 @@ export function useScenes() {
   const generating = useVideoStore(s => s.generating);
   const scenes = useVideoStore(s => s.scenes);
   const originalScript = useVideoStore(s => s.editableScript);
-  const images = useVideoStore(s => s.images);
   const setImagesState = useVideoStore(s => s.setImagesState);
+  const didResetRef = useRef(false);
 
   useEffect(() => {
     if (!hydrated) return;
-    if (generating) setImagesState({ generating: false, currentScene: null });
-    if (scenes.length === 0 && originalScript && originalScript.trim().length > 0) {
-      const parsed = parseScriptIntoScenes(originalScript);
-      setImagesState({
-        scenes: parsed,
-        images: [],
-        scenePrompts: [],
-        cameFromVoiceover: true,
-        generating: false,
-        currentScene: null
-      });
+    
+    // One-time reset on initial arrival to images page
+    if (!didResetRef.current) {
+      if (scenes.length === 0 && originalScript && originalScript.trim().length > 0) {
+        const parsed = parseScriptIntoScenes(originalScript);
+        setImagesState({
+          scenes: parsed,
+          images: [],
+          scenePrompts: [],
+          cameFromVoiceover: true,
+          generating: false,
+          currentScene: null
+        });
+      } else if (scenes.length > 0) {
+        // Keep parsed scenes but clear volatile generations/prompts
+        setImagesState({
+          images: [],
+          scenePrompts: [],
+          generating: false,
+          currentScene: null
+        });
+      }
+      didResetRef.current = true;
     }
-    if (images.some((img) => img.status === 'generating')) {
-      setImagesState((s) => ({
-        images: s.images.map((img) => img.status === 'generating' ? { ...img, status: 'pending' } : img)
-      }));
+
+    // Clean up any stale "generating" statuses from previous sessions
+    if (generating) {
+      setImagesState({ generating: false, currentScene: null });
     }
-  }, [hydrated, generating, scenes.length, originalScript, images, setImagesState]);
+  }, [hydrated, generating, scenes.length, originalScript, setImagesState]);
 
   return { scenes };
 }

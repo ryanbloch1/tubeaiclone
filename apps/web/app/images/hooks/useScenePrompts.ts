@@ -21,8 +21,9 @@ export function useScenePrompts() {
       }))
     }));
 
+    // Process scenes sequentially to avoid rate limits (10 requests/minute for Gemini free tier)
     (async () => {
-      await Promise.allSettled(scenes.map(async sc => {
+      for (const sc of scenes) {
         try {
           const prompt = await imagesApi.generatePrompt(sc.text, sc.scene_number);
           setImagesState(prev => ({
@@ -32,7 +33,11 @@ export function useScenePrompts() {
                 : p
             )
           }));
-        } catch {
+          
+          // Add delay between requests to respect rate limits (6 seconds = 10 requests/minute)
+          await new Promise(resolve => setTimeout(resolve, 6000));
+        } catch (error) {
+          console.error(`Failed to generate prompt for scene ${sc.scene_number}:`, error);
           setImagesState(prev => ({
             scenePrompts: prev.scenePrompts.map(p =>
               p.scene_number === sc.scene_number
@@ -40,8 +45,11 @@ export function useScenePrompts() {
                 : p
             )
           }));
+          
+          // Still add delay even on error to avoid rapid retries
+          await new Promise(resolve => setTimeout(resolve, 6000));
         }
-      }));
+      }
     })();
   }, [hydrated, scenes, prompts, setImagesState]);
 
