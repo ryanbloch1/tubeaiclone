@@ -1,63 +1,91 @@
 "use client";
-import React from "react";
-import { useRouter } from "next/navigation";
+
+import React, { useState, useEffect } from "react";
+import { useRouter } from 'next/navigation';
+import { useAuth } from '@/components/auth/AuthProvider';
+import { AuthGuard } from '@/components/auth/AuthGuard';
 import { TitleBar } from "./ui/TitleBar";
 import { WordCountModal } from "./ui/WordCountModal";
 import { ContextModal } from "./ui/ContextModal";
 import { StyleModal } from "./ui/StyleModal";
-import { useVideoStore } from "@/lib/store";
-import { useHydrated } from "@/lib/useHydrated";
 
-type ScriptResponse = { text?: string; error?: string; mock?: boolean };
+type ScriptResponse = { 
+  script?: string; 
+  scriptId?: string;
+  projectId?: string;
+  error?: string; 
+  mock?: boolean 
+};
 
 export default function ScriptPage() {
-  const router = useRouter();
-  const hydrated = useHydrated();
-  const setScriptState = useVideoStore(s => s.setScriptState);
-  const topic = useVideoStore(s => s.topic);
-  const style = useVideoStore(s => s.style);
-  const mode = useVideoStore(s => s.mode);
-  const temperature = useVideoStore(s => s.temperature);
-  const wordCount = useVideoStore(s => s.wordCount);
-  const selection = useVideoStore(s => s.selection);
-  const extraContext = useVideoStore(s => s.extraContext);
-  const imageCount = useVideoStore(s => s.imageCount);
-  const videoLength = useVideoStore(s => s.videoLength);
-  const editableScript = useVideoStore(s => s.editableScript);
+  return (
+    <AuthGuard>
+      <ScriptPageContent />
+    </AuthGuard>
+  );
+}
 
-  const [showWordModal, setShowWordModal] = React.useState(false);
-  const [showContextModal, setShowContextModal] = React.useState(false);
-  const [showStyleModal, setShowStyleModal] = React.useState(false);
-  const [loading, setLoading] = React.useState(false);
-  const [error, setError] = React.useState<string | null>(null);
-  const [result, setResult] = React.useState<ScriptResponse | null>(null);
-  const goingToVoiceoverRef = React.useRef(false);
+function ScriptPageContent() {
+  const router = useRouter();
+  const { session } = useAuth();
+  
+  // Form state
+  const [topic, setTopic] = useState('');
+  const [style, setStyle] = useState('');
+  const [mode, setMode] = useState<'script' | 'outline' | 'rewrite'>('script');
+  const [temperature, setTemperature] = useState(0.7);
+  const [wordCount, setWordCount] = useState(500);
+  const [selection, setSelection] = useState('');
+  const [extraContext, setExtraContext] = useState('');
+  const [imageCount, setImageCount] = useState(10);
+  const [videoLength, setVideoLength] = useState('1:00');
+  const [editableScript, setEditableScript] = useState('');
+
+  // UI state
+  const [showWordModal, setShowWordModal] = useState(false);
+  const [showContextModal, setShowContextModal] = useState(false);
+  const [showStyleModal, setShowStyleModal] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<ScriptResponse | null>(null);
+  const [projectId, setProjectId] = useState<string | null>(null);
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     setResult(null);
     setLoading(true);
+    
     try {
-      const res = await fetch("/api/script", {
+      const response = await fetch("/api/script/generate", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${session?.access_token}`
+        },
         body: JSON.stringify({
           topic,
-          style_name: style || undefined,
-          image_count: imageCount,
+          style: style || undefined,
           mode,
           temperature,
-          word_count: wordCount,
+          wordCount,
           selection: mode === "script" ? undefined : selection || undefined,
-          context_mode: extraContext ? "web" : "default",
-          web_data: extraContext || undefined,
+          extraContext: extraContext || undefined,
+          imageCount,
+          videoLength,
+          projectId
         }),
       });
-      const data = (await res.json()) as ScriptResponse;
-      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+
+      const data = await response.json();
+      
+      if (!response.ok) {
+        throw new Error(data.error || `HTTP ${response.status}`);
+      }
+      
       setResult(data);
-      setScriptState({ editableScript: data.text || "" });
+      setProjectId(data.projectId);
+      setEditableScript(data.script || "");
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed to generate";
       setError(msg);
@@ -66,7 +94,8 @@ export default function ScriptPage() {
     }
   };
 
-  React.useEffect(() => {
+  // Update image count when video length changes
+  useEffect(() => {
     const lengthToImages: { [key: string]: number } = {
       "0:30": 5,
       "1:00": 10,
@@ -74,39 +103,14 @@ export default function ScriptPage() {
       "3:00": 30
     };
     const next = lengthToImages[videoLength] || 10;
-    if (next !== imageCount) setScriptState({ imageCount: next });
-  }, [videoLength, imageCount, setScriptState]);
-
-  // Clear script when navigating away from this page (but not when going to voiceover)
-  React.useEffect(() => {
-    return () => {
-      // Only clear if we're not going to voiceover page
-      if (!goingToVoiceoverRef.current) {
-        setScriptState({ editableScript: "" });
-      }
-    };
-  }, [setScriptState]);
-
+    if (next !== imageCount) {
+      setImageCount(next);
+    }
+  }, [videoLength, imageCount]);
 
   const goToVoiceover = () => {
-    goingToVoiceoverRef.current = true;
     router.push("/voiceover");
   };
-
-  if (!hydrated) {
-    return (
-      <main className="min-h-screen bg-slate-50">
-        <div className="container mx-auto px-4 py-8">
-          <div className="max-w-4xl mx-auto">
-            <div className="text-center py-8">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
-              <p className="mt-2 text-slate-600">Loading...</p>
-            </div>
-          </div>
-        </div>
-      </main>
-    );
-  }
 
   return (
     <main className="min-h-screen bg-slate-50">
@@ -122,10 +126,11 @@ export default function ScriptPage() {
           <h1 className="text-4xl font-bold text-slate-900">Enter Video Title</h1>
           <div className="w-32"></div> {/* Spacer for centering */}
         </div>
+        
         <form onSubmit={onSubmit} className="max-w-4xl mx-auto space-y-4">
           <TitleBar
             topic={topic}
-            setTopic={(v: string) => setScriptState({ topic: v })}
+            setTopic={setTopic}
             wordCount={wordCount}
             onOpenWordModal={() => setShowWordModal(true)}
             onOpenContextModal={() => setShowContextModal(true)}
@@ -147,7 +152,7 @@ export default function ScriptPage() {
         </div>
       )}
       
-      {result?.text && (
+      {result?.script && (
         <div className="max-w-4xl mx-auto mt-8 space-y-6">
           {result.mock && (
             <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
@@ -163,7 +168,7 @@ export default function ScriptPage() {
               className="w-full rounded-lg border border-slate-300 p-4 text-white bg-slate-800 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-colors resize-none"
               rows={15}
               value={editableScript}
-              onChange={(e) => setScriptState({ editableScript: e.target.value })}
+              onChange={(e) => setEditableScript(e.target.value)}
               placeholder="Your generated script will appear here..."
             />
             
@@ -184,21 +189,19 @@ export default function ScriptPage() {
         open={showWordModal}
         wordCount={wordCount}
         onClose={() => setShowWordModal(false)}
-        onSave={(wc: number) => { setScriptState({ wordCount: wc }); setShowWordModal(false); }}
+        onSave={(wc: number) => { setWordCount(wc); setShowWordModal(false); }}
       />
       <ContextModal
         open={showContextModal}
         value={extraContext}
         onClose={() => setShowContextModal(false)}
-        onSave={(txt: string) => { setScriptState({ extraContext: txt }); setShowContextModal(false); }}
+        onSave={(txt: string) => { setExtraContext(txt); setShowContextModal(false); }}
       />
       <StyleModal
         open={showStyleModal}
         onClose={() => setShowStyleModal(false)}
-        onCreate={(name: string) => { setScriptState({ style: name }); setShowStyleModal(false); }}
+        onCreate={(name: string) => { setStyle(name); setShowStyleModal(false); }}
       />
     </main>
   );
 }
-
-

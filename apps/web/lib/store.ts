@@ -1,20 +1,27 @@
+/**
+ * Minimal Zustand Store - Production Ready
+ * 
+ * PERSISTS:
+ * - currentProjectId: Which project user is working on
+ * 
+ * TEMPORARY (in-memory, NOT persisted):
+ * - Compatibility shims for old pages
+ * - Will be removed as pages migrate to Supabase
+ * 
+ * ALL DATA SHOULD COME FROM SUPABASE:
+ * - Scripts, images, voiceovers → fetch from database
+ * - Form inputs → component local state
+ */
+
 import { create } from "zustand";
-import { persist, createJSONStorage } from "zustand/middleware";
+import { persist } from "zustand/middleware";
 
-// Centralized app state for the multi-step video creation flow
-// - Persisted with JSON in localStorage under key `tubeai_store`
-// - `hydrated` flips to true after the store rehydrates on client
-// - Pages subscribe to only the slices they need for minimal rerenders
-
-type ScriptMode = "script" | "outline";
-
-// Script page slice
-// Only user-editable inputs + the full editableScript are stored here
-// API results and transient UI booleans remain component-local
-type ScriptState = {
+// Compatibility types (NOT persisted, temporary)
+type CompatibilityState = {
+  // Script compat (remove after migration)
   topic: string;
   style: string;
-  mode: ScriptMode;
+  mode: 'script' | 'outline';
   temperature: number;
   wordCount: number;
   selection: string;
@@ -22,107 +29,70 @@ type ScriptState = {
   imageCount: number;
   videoLength: string;
   editableScript: string;
-  // Generic slice setter for ScriptState.
-  // Accepts either:
-  // - an object with only the fields you want to update
-  // - a function that receives current ScriptState and returns a partial update
-  // We use Partial<Omit<...>> to: (1) allow updating only some fields, and
-  // (2) prevent accidentally trying to update the setter itself.
-  setScriptState: (
-    partial:
-      | Partial<Omit<ScriptState, "setScriptState">>
-      | ((state: ScriptState) => Partial<Omit<ScriptState, "setScriptState">>)
-  ) => void;
-};
-
-// Voiceover slice
-// We keep the generated `audioUrl` and a simple navigation hint
-type VoiceoverState = {
+  setScriptState: (partial: Partial<CompatibilityState> | ((s: CompatibilityState) => Partial<CompatibilityState>)) => void;
+  
+  // Voiceover compat (remove after migration)
   rawScript: string;
   audioUrl: string | null;
-  audioDataUrl?: string | null;
+  audioDataUrl: string | null;
   cameFromScript: boolean;
-  // Same generic setter pattern for the Voiceover slice.
-  setVoiceoverState: (
-    partial:
-      | Partial<Omit<VoiceoverState, "setVoiceoverState">>
-      | ((state: VoiceoverState) => Partial<Omit<VoiceoverState, "setVoiceoverState">>)
-  ) => void;
-};
-
-// Types reused by Images slice
-type Scene = {
-  scene_number: number;
-  text: string;
-  description: string;
-};
-
-type ImageGeneration = {
-  scene_number: number;
-  prompt: string;
-  status: 'pending' | 'generating' | 'completed' | 'failed';
-  image_url?: string;
-  error?: string;
-};
-
-type ScenePrompt = {
-  scene_number: number;
-  prompt: string | null;
-  status: 'loading' | 'ready' | 'error';
-};
-
-// Images slice
-// Derived from the script: parsed scenes + per-scene generation state
-type ImagesState = {
-  scenes: Scene[];
-  images: ImageGeneration[];
-  scenePrompts: ScenePrompt[];
+  setVoiceoverState: (partial: Partial<CompatibilityState> | ((s: CompatibilityState) => Partial<CompatibilityState>)) => void;
+  
+  // Images compat (remove after migration)
+  scenes: Array<{ scene_number: number; text: string; description: string }>;
+  images: Array<{ scene_number: number; prompt: string; status: 'pending' | 'generating' | 'completed' | 'failed'; image_url?: string; error?: string }>;
+  scenePrompts: Array<{ scene_number: number; prompt: string | null; status: 'loading' | 'ready' | 'error' }>;
   generating: boolean;
   currentScene: number | null;
   cameFromVoiceover: boolean;
-  // Same generic setter pattern for the Images slice.
-  setImagesState: (
-    partial:
-      | Partial<Omit<ImagesState, "setImagesState">>
-      | ((state: ImagesState) => Partial<Omit<ImagesState, "setImagesState">>)
-  ) => void;
+  imagesScriptHash: string | null;
+  setImagesState: (partial: Partial<CompatibilityState> | ((s: CompatibilityState) => Partial<CompatibilityState>)) => void;
 };
 
+/**
+ * Core Store State
+ */
 export type StoreState = {
-  // True after persist rehydrates on client
+  // Hydration flag
   hydrated: boolean;
   setHydrated: (value: boolean) => void;
-} & ScriptState & VoiceoverState & ImagesState;
+  
+  // Project ID (ONLY persisted data)
+  currentProjectId: string | null;
+  setCurrentProject: (id: string | null) => void;
+} & CompatibilityState;
 
 const initialState: StoreState = {
   hydrated: false,
   setHydrated: () => {},
-  // Script
-  topic: "",
-  style: "",
-  mode: "script",
+  currentProjectId: null,
+  setCurrentProject: () => {},
+  
+  // Compat state (NOT persisted)
+  topic: '',
+  style: '',
+  mode: 'script',
   temperature: 0.7,
   wordCount: 500,
-  selection: "",
-  extraContext: "",
+  selection: '',
+  extraContext: '',
   imageCount: 10,
-  videoLength: "1:00",
-  editableScript: "",
+  videoLength: '1:00',
+  editableScript: '',
   setScriptState: () => {},
-  // Voiceover
-  rawScript: "",
+  rawScript: '',
   audioUrl: null,
   audioDataUrl: null,
   cameFromScript: false,
   setVoiceoverState: () => {},
-  // Images
   scenes: [],
   images: [],
   scenePrompts: [],
   generating: false,
   currentScene: null,
   cameFromVoiceover: false,
-  setImagesState: () => {}
+  imagesScriptHash: null,
+  setImagesState: () => {},
 };
 
 export const useVideoStore = create<StoreState>()(
@@ -130,68 +100,20 @@ export const useVideoStore = create<StoreState>()(
     (set) => ({
       ...initialState,
       setHydrated: (value) => set({ hydrated: value }),
-      // Apply object or functional updates to ScriptState.
-      // If a function is provided, we cast the big store state down to the
-      // specific slice type so the updater gets correct intellisense/types.
-      setScriptState: (partial) =>
-        set((state) => ({
-          ...state,
-          ...(typeof partial === "function"
-            ? (partial as (s: ScriptState) => Partial<Omit<ScriptState, "setScriptState">>)(state as unknown as ScriptState)
-            : partial),
-        })),
-      // Same pattern for VoiceoverState.
-      setVoiceoverState: (partial) =>
-        set((state) => ({
-          ...state,
-          ...(typeof partial === "function"
-            ? (partial as (s: VoiceoverState) => Partial<Omit<VoiceoverState, "setVoiceoverState">>)(state as unknown as VoiceoverState)
-            : partial),
-        })),
-      // Same pattern for ImagesState.
-      setImagesState: (partial) =>
-        set((state) => ({
-          ...state,
-          ...(typeof partial === "function"
-            ? (partial as (s: ImagesState) => Partial<Omit<ImagesState, "setImagesState">>)(state as unknown as ImagesState)
-            : partial),
-        })),
+      setCurrentProject: (id) => set({ currentProjectId: id }),
+      
+      // Compat setters (in-memory only)
+      setScriptState: (partial) => set((state) => ({ ...state, ...(typeof partial === 'function' ? partial(state) : partial) })),
+      setVoiceoverState: (partial) => set((state) => ({ ...state, ...(typeof partial === 'function' ? partial(state) : partial) })),
+      setImagesState: (partial) => set((state) => ({ ...state, ...(typeof partial === 'function' ? partial(state) : partial) })),
     }),
     {
       name: "tubeai_store",
-      storage: createJSONStorage(() => localStorage),
-      // Persist only the user-facing slices; omit functions and transient flags.
-      // This reduces localStorage bloat and prevents restoring ephemeral UI state.
+      // ⚡ ONLY persist currentProjectId - nothing else!
       partialize: (state) => ({
-        topic: state.topic,
-        style: state.style,
-        mode: state.mode,
-        temperature: state.temperature,
-        wordCount: state.wordCount,
-        selection: state.selection,
-        extraContext: state.extraContext,
-        imageCount: state.imageCount,
-        videoLength: state.videoLength,
-        editableScript: state.editableScript,
-        rawScript: state.rawScript,
-        audioUrl: state.audioUrl,
-        audioDataUrl: state.audioDataUrl, // Keep audio data for voiceover persistence
-        cameFromScript: state.cameFromScript,
-        scenes: state.scenes,
-        // Only persist image metadata, not the actual image data (base64 is huge)
-        images: state.images.map(img => ({
-          scene_number: img.scene_number,
-          prompt: img.prompt,
-          status: img.status,
-          error: img.error
-          // Explicitly exclude image_url to prevent localStorage quota issues
-        })),
-        scenePrompts: state.scenePrompts,
-        cameFromVoiceover: state.cameFromVoiceover
+        currentProjectId: state.currentProjectId,
       }),
       onRehydrateStorage: () => (state) => {
-        // Mark store as ready after rehydration completes.
-        // Components can check `hydrated` to avoid reading before persistence restores.
         if (state) {
           state.setHydrated(true);
         }

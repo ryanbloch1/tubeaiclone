@@ -42,6 +42,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Include routers for new Supabase-integrated endpoints
+try:
+    from routes.script import router as script_router
+    app.include_router(script_router)
+    print("✅ Loaded Supabase-integrated routes")
+except ImportError as e:
+    print(f"⚠️  Supabase routes not available: {e}")
+
 
 class ImageRequest(BaseModel):
     """Request model for image generation."""
