@@ -104,7 +104,6 @@ async def generate_script(
     try:
         script_result = supabase.table('scripts').insert({
             'project_id': request.project_id,
-            'user_id': user_id,
             'raw_script': script_content,
             'edited_script': script_content,
             'sanitized_script': script_content
@@ -138,7 +137,7 @@ async def generate_script(
     return {
         "success": True,
         "script_id": script_id,
-        "script": script_content,
+        "content": script_content,
         "mode": request.mode,
         "image_count": request.image_count
     }

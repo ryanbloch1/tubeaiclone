@@ -37,7 +37,7 @@ export default function SignupPage() {
       const { error } = await signUp(email, password);
       
       if (error) {
-        setError(error.message);
+        setError(typeof error === 'string' ? error : 'Signup failed');
       } else {
         setSuccess(true);
         // Redirect to login after successful signup

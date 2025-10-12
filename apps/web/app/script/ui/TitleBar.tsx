@@ -5,8 +5,8 @@ import styles from "./TitleBar.module.css";
 type Props = {
   topic: string;
   setTopic: (v: string) => void;
-  wordCount: number;
-  onOpenWordModal: () => void;
+  videoLength: string;
+  onVideoLengthChange: (length: string) => void;
   onOpenContextModal: () => void;
   onOpenStyleModal: () => void;
   loading?: boolean;
@@ -16,8 +16,8 @@ type Props = {
 export const TitleBar: React.FC<Props> = ({
   topic,
   setTopic,
-  wordCount,
-  onOpenWordModal,
+  videoLength,
+  onVideoLengthChange,
   onOpenContextModal,
   onOpenStyleModal,
   loading,
@@ -40,9 +40,17 @@ export const TitleBar: React.FC<Props> = ({
       <div className="ml-3 flex items-center gap-3 text-slate-600">
         <button type="button" title="Style / Options" onClick={onOpenStyleModal} className="hover:text-slate-900 transition-colors">🎬</button>
         <button type="button" title="Additional Context" onClick={onOpenContextModal} className="hover:text-slate-900 transition-colors">✨</button>
-        <button type="button" title="Word Count" onClick={onOpenWordModal} className="rounded-full border border-slate-300 px-3 py-1 text-sm hover:border-slate-400 transition-colors">
-          {wordCount}
-        </button>
+        <select 
+          value={videoLength} 
+          onChange={(e) => onVideoLengthChange(e.target.value)}
+          className="rounded border border-slate-300 px-2 py-1 text-sm bg-white hover:border-slate-400 transition-colors"
+          title="Video Length"
+        >
+          <option value="0:30">0:30</option>
+          <option value="1:00">1:00</option>
+          <option value="2:00">2:00</option>
+          <option value="3:00">3:00</option>
+        </select>
         <button
           type="submit"
           disabled={!canSubmit || loading}

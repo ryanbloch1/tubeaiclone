@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-import { createProject, updateProject } from '@/lib/db/projects';
-import { createScript } from '@/lib/db/scripts';
 
 export async function POST(request: NextRequest) {
   try {
@@ -30,41 +28,54 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Topic is required' }, { status: 400 });
     }
 
-    // Create or update project
+    // Create or update project directly using server supabase client
     let projectId = body.projectId;
     if (!projectId) {
-      const project = await createProject({
-        title: topic,
-        topic,
-        style,
-        mode,
-        temperature,
-        word_count: wordCount,
-        image_count: imageCount,
-        video_length: videoLength,
-        selection,
-        extra_context: extraContext,
-        status: 'script'
-      });
+      const { data: project, error: projectError } = await supabase
+        .from('projects')
+        .insert({
+          user_id: user.id,
+          title: topic,
+          topic,
+          style,
+          mode,
+          temperature,
+          word_count: wordCount,
+          image_count: imageCount,
+          video_length: videoLength,
+          selection,
+          extra_context: extraContext,
+          status: 'script'
+        })
+        .select()
+        .single();
+      
+      if (projectError) throw projectError;
       projectId = project.id;
     } else {
-      await updateProject(projectId, {
-        title: topic,
-        topic,
-        style,
-        mode,
-        temperature,
-        word_count: wordCount,
-        image_count: imageCount,
-        video_length: videoLength,
-        selection,
-        extra_context: extraContext,
-        status: 'script'
-      });
+      const { error: updateError } = await supabase
+        .from('projects')
+        .update({
+          title: topic,
+          topic,
+          style,
+          mode,
+          temperature,
+          word_count: wordCount,
+          image_count: imageCount,
+          video_length: videoLength,
+          selection,
+          extra_context: extraContext,
+          status: 'script'
+        })
+        .eq('id', projectId)
+        .eq('user_id', user.id);
+      
+      if (updateError) throw updateError;
     }
 
     // Call FastAPI to generate script
-    const fastApiResponse = await fetch('http://localhost:8000/scripts/generate', {
+    const fastApiResponse = await fetch('http://localhost:8000/api/script/generate', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -88,10 +99,10 @@ export async function POST(request: NextRequest) {
       throw new Error(errorData.detail || 'Failed to generate script');
     }
 
-    const { script, script_id } = await fastApiResponse.json();
+    const { content, script_id } = await fastApiResponse.json();
 
     return NextResponse.json({
-      script,
+      script: content,
       scriptId: script_id,
       projectId,
       success: true
