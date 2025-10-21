@@ -25,3 +25,4 @@ apps/web/node_modules/
 .env.bak
 .env.local
 apps/web/.env.local
+.env
