@@ -20,7 +20,5 @@ Monorepo layout:
 
 - apps/
   - api/ (FastAPI entry)
-  - worker/ (RQ worker entry)
-  - streamlit/ (legacy UI entry)
-- api/, worker/ keep modules for compatibility
+  - web/ (Next.js frontend)
 - utils/ shared modules
