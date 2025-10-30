@@ -45,7 +45,9 @@ app.add_middleware(
 # Include routers for new Supabase-integrated endpoints
 try:
     from routes.script import router as script_router
+    from routes.voiceover import router as voiceover_router
     app.include_router(script_router)
+    app.include_router(voiceover_router, prefix="/api/voiceover")
     print("✅ Loaded Supabase-integrated routes")
 except ImportError as e:
     print(f"⚠️  Supabase routes not available: {e}")

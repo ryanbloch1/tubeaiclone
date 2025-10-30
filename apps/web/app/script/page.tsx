@@ -93,6 +93,18 @@ function ScriptPageContent() {
     }
   }, [session, loadProjects]);
 
+  // Load project from URL parameters
+  useEffect(() => {
+    if (session && typeof window !== 'undefined') {
+      const urlParams = new URLSearchParams(window.location.search);
+      const projectIdParam = urlParams.get('projectId');
+      if (projectIdParam && projectIdParam !== projectId) {
+        setProjectId(projectIdParam);
+        loadProject(projectIdParam);
+      }
+    }
+  }, [session, projectId]);
+
   // Load a specific project
   const loadProject = async (id: string) => {
     try {
@@ -245,46 +257,10 @@ function ScriptPageContent() {
   return (
     <main className="min-h-screen bg-slate-50">
       <div className="container mx-auto px-4 py-8">
-        <div className="flex items-center justify-between mb-8">
-          <button
-            onClick={() => router.push("/")}
-            className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-lg font-medium transition-colors flex items-center space-x-2"
-          >
-            <span>←</span>
-            <span>Back to Home</span>
-          </button>
-          <h1 className="text-4xl font-bold text-slate-900">Enter Video Title</h1>
-          <div className="w-32"></div> {/* Spacer for centering */}
-        </div>
-        
-        {/* Projects List */}
-        {/* {projects.length > 0 && (
-          <div className="max-w-4xl mx-auto mb-6">
-            <div className="bg-white rounded-lg border border-slate-200 p-4 shadow-sm">
-              <h3 className="text-sm font-medium text-slate-700 mb-3">Recent Projects</h3>
-              <div className="space-y-2">
-                {projects.slice(0, 5).map((project) => (
-                  <button
-                    key={project.id}
-                    onClick={() => loadProject(project.id)}
-                    className={`w-full text-left p-3 rounded-lg border transition-colors ${
-                      selectedProject?.id === project.id
-                        ? 'border-blue-500 bg-blue-50'
-                        : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
-                    }`}
-                  >
-                    <div className="font-medium text-slate-900">{project.title || project.topic}</div>
-                    <div className="text-sm text-slate-500">
-                      {new Date(project.updated_at).toLocaleDateString()} • {project.video_length} • {project.word_count} words
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-        )} */}
-
-        <form onSubmit={onSubmit} className="max-w-4xl mx-auto space-y-4">
+        <div className="max-w-4xl mx-auto">
+          <h1 className="text-3xl font-bold text-slate-900 mb-8 text-center">Script Generation</h1>
+          
+          <form onSubmit={onSubmit} className="space-y-4">
           <TitleBar
             topic={topic}
             setTopic={setTopic}
@@ -299,69 +275,70 @@ function ScriptPageContent() {
             Credits remaining: 0  |  Estimated script credits: 0
           </div>
         </form>
-      </div>
-
-      {error && (
-        <div className="max-w-4xl mx-auto mt-6">
-          <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-            <p className="text-red-700 text-sm">{error}</p>
-          </div>
         </div>
-      )}
-      
-      {result?.script && (
-        <div className="max-w-4xl mx-auto mt-8 space-y-6">
-          {result.mock && (
-            <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
-              <p className="text-amber-700 text-sm">Mock fallback (no API key detected)</p>
+
+        {error && (
+          <div className="max-w-4xl mx-auto mt-6">
+            <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+              <p className="text-red-700 text-sm">{error}</p>
             </div>
-          )}
-          
-          <div className="bg-white rounded-lg border border-slate-200 p-6 shadow-sm">
-            <label className="block text-sm font-medium text-slate-700 mb-3">
-              Edit script
-            </label>
-            <textarea
-              className="w-full rounded-lg border border-slate-300 p-4 text-white bg-slate-800 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-colors resize-none"
-              rows={15}
-              value={editableScript}
-              onChange={(e) => setEditableScript(e.target.value)}
-              placeholder="Your generated script will appear here..."
-            />
+          </div>
+        )}
+
+        {result?.script && (
+          <div className="max-w-4xl mx-auto mt-8 space-y-6">
+            {result.mock && (
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                <p className="text-amber-700 text-sm">Mock fallback (no API key detected)</p>
+              </div>
+            )}
             
-            <div className="mt-6 flex justify-between">
-              <button
-                type="button"
-                onClick={saveScript}
-                disabled={saving || !result?.scriptId}
-                data-save-button
-                className="bg-slate-600 hover:bg-slate-700 disabled:bg-slate-400 text-white px-6 py-2 rounded-lg font-medium transition-colors"
-              >
-                {saving ? 'Saving...' : 'Save Changes'}
-              </button>
-              <button
-                onClick={goToVoiceover}
-                className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-3 rounded-lg font-semibold transition-all duration-200 hover:transform hover:-translate-y-0.5 hover:shadow-lg"
-              >
-                Use for Voiceover →
-              </button>
+            <div className="bg-white rounded-lg border border-slate-200 p-6 shadow-sm">
+              <label className="block text-sm font-medium text-slate-700 mb-3">
+                Edit script
+              </label>
+              <textarea
+                className="w-full rounded-lg border border-slate-300 p-4 text-white bg-slate-800 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-colors resize-none"
+                rows={15}
+                value={editableScript}
+                onChange={(e) => setEditableScript(e.target.value)}
+                placeholder="Your generated script will appear here..."
+              />
+              
+              <div className="mt-6 flex justify-between">
+                <button
+                  type="button"
+                  onClick={saveScript}
+                  disabled={saving || !result?.scriptId}
+                  data-save-button
+                  className="bg-slate-600 hover:bg-slate-700 disabled:bg-slate-400 text-white px-6 py-2 rounded-lg font-medium transition-colors"
+                >
+                  {saving ? 'Saving...' : 'Save Changes'}
+                </button>
+                <button
+                  onClick={goToVoiceover}
+                  className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-3 rounded-lg font-semibold transition-all duration-200 hover:transform hover:-translate-y-0.5 hover:shadow-lg"
+                >
+                  Use for Voiceover →
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Modals */}
-      <ContextModal
-        open={showContextModal}
-        value={extraContext}
-        onClose={() => setShowContextModal(false)}
-        onSave={(txt: string) => { setExtraContext(txt); setShowContextModal(false); }}
-      />
-      <StyleModal
-        open={showStyleModal}
-        onClose={() => setShowStyleModal(false)}
-        onCreate={(name: string) => { setStyle(name); setShowStyleModal(false); }}
-      />
+        {/* Modals */}
+        <ContextModal
+          open={showContextModal}
+          value={extraContext}
+          onClose={() => setShowContextModal(false)}
+          onSave={(txt: string) => { setExtraContext(txt); setShowContextModal(false); }}
+        />
+        <StyleModal
+          open={showStyleModal}
+          onClose={() => setShowStyleModal(false)}
+          onCreate={(name: string) => { setStyle(name); setShowStyleModal(false); }}
+        />
+      </div>
     </main>
   );
 }

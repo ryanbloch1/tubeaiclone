@@ -101,6 +101,17 @@ export async function POST(request: NextRequest) {
 
     const { content, script_id } = await fastApiResponse.json();
 
+    // Update project current_step to 'script' after successful generation
+    const { error: updateStepError } = await supabase
+      .from('projects')
+      .update({ current_step: 'script' })
+      .eq('id', projectId)
+      .eq('user_id', user.id);
+
+    if (updateStepError) {
+      console.error('Failed to update project current_step:', updateStepError);
+    }
+
     return NextResponse.json({
       script: content,
       scriptId: script_id,

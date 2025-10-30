@@ -11,6 +11,10 @@ gotrue==2.9.1
 # Google AI
 google-generativeai==0.8.3
 
+# System TTS (No API keys needed - uses your computer's built-in TTS)
+pyttsx3==2.90
+pydub==0.25.1
+
 # AI/ML (optional - install if using Stable Diffusion)
 # diffusers==0.30.0
 # torch==2.4.0

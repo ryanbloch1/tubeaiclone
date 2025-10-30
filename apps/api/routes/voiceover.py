@@ -64,8 +64,14 @@ async def generate_voiceover(
         # Generate voiceover ID
         voiceover_id = str(uuid.uuid4())
         
-        # Save to database
+        # Save to database (enforce one voiceover per script)
         try:
+            print(f"Saving voiceover {voiceover_id} for script {request.script_id}")
+            # Remove any existing voiceover for this script to keep one-per-script invariant
+            try:
+                supabase.table('voiceovers').delete().eq('script_id', request.script_id).execute()
+            except Exception as cleanup_err:
+                print(f"Warning: failed to cleanup existing voiceovers for script {request.script_id}: {str(cleanup_err)}")
             voiceover_result = supabase.table('voiceovers').insert({
                 'id': voiceover_id,
                 'script_id': request.script_id,
@@ -73,10 +79,13 @@ async def generate_voiceover(
                 'status': 'complete'
             }).execute()
             
+            print(f"Voiceover saved successfully: {voiceover_result.data}")
+            
             if not voiceover_result.data:
                 raise HTTPException(status_code=500, detail="Failed to save voiceover to database")
                 
         except Exception as e:
+            print(f"Database error saving voiceover: {str(e)}")
             raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
         
         return VoiceoverGenerationResponse(
@@ -137,16 +146,47 @@ async def get_voiceovers_for_project(
         if not project_result.data:
             raise HTTPException(status_code=403, detail="Project not found or access denied")
         
-        # Get scripts for this project first, then get voiceovers for those scripts
-        scripts_result = supabase.table('scripts').select('id').eq('project_id', project_id).execute()
-        script_ids = [script['id'] for script in scripts_result.data]
-        
-        if script_ids:
-            voiceovers_result = supabase.table('voiceovers').select('*').in_('script_id', script_ids).order('created_at', desc=True).execute()
-        else:
-            voiceovers_result = type('obj', (object,), {'data': []})()  # Empty result
-        
-        return {"success": True, "voiceovers": voiceovers_result.data}
+        # Fetch only the most recent script for this project to avoid heavy queries
+        latest_script_id: str | None = None
+        try:
+            latest_script_result = (
+                supabase
+                .table('scripts')
+                .select('id, created_at')
+                .eq('project_id', project_id)
+                .order('created_at', desc=True)
+                .limit(1)
+                .execute()
+            )
+            if latest_script_result.data:
+                latest_script_id = latest_script_result.data[0]['id']
+        except Exception as e:
+            print(f"Error fetching latest script: {str(e)}")
+            raise HTTPException(status_code=500, detail="Failed to fetch scripts for project")
+
+        if not latest_script_id:
+            # No scripts yet
+            return {"success": True, "voiceovers": []}
+
+        # Fetch only the most recent voiceover for the latest script
+        try:
+            voiceover_result = (
+                supabase
+                .table('voiceovers')
+                .select('*')
+                .eq('script_id', latest_script_id)
+                .order('created_at', desc=True)
+                .limit(1)
+                .execute()
+            )
+            voiceovers = voiceover_result.data or []
+            print(f"Found {len(voiceovers)} voiceovers for latest script {latest_script_id}")
+        except Exception as e:
+            # Propagate as a server error so the client doesn't interpret as empty
+            print(f"Error fetching voiceovers: {str(e)}")
+            raise HTTPException(status_code=500, detail="Failed to fetch voiceovers for project")
+
+        return {"success": True, "voiceovers": voiceovers}
         
     except HTTPException:
         raise

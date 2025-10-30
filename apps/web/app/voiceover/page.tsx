@@ -1,45 +1,87 @@
 'use client';
 import { generateVoiceoverSync } from '@/lib/api';
 import { sanitizeScriptForVoiceover } from '@/lib/sanitize';
-import { useVideoStore } from '@/lib/store';
-import { useHydrated } from '@/lib/useHydrated';
 import React, { useMemo } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { createClient } from '@/lib/supabase/client';
 
 export default function VoiceoverPage() {
   const router = useRouter();
-  const hydrated = useHydrated();
-  const setVoiceoverState = useVideoStore((s) => s.setVoiceoverState);
-  const setScriptState = useVideoStore((s) => s.setScriptState);
-  const rawScript = useVideoStore((s) => s.editableScript); // use original script text from store
-  const audioUrl = useVideoStore((s) => s.audioUrl);
-  const audioDataUrl = useVideoStore((s) => s.audioDataUrl);
-  const cameFromScript = useVideoStore((s) => s.cameFromScript);
+  const searchParams = useSearchParams();
+  const supabase = createClient();
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [hasGeneratedVoiceover, setHasGeneratedVoiceover] = React.useState(false);
   const [editedScript, setEditedScript] = React.useState('');
+  const [rawScript, setRawScript] = React.useState<string>('');
+  const [audioUrl, setAudioUrl] = React.useState<string | null>(null);
+  const [audioDataUrl, setAudioDataUrl] = React.useState<string | null>(null);
+  const [audioReady, setAudioReady] = React.useState<boolean>(false);
+  const [loadingExisting, setLoadingExisting] = React.useState<boolean>(true);
+  const [projectId, setProjectId] = React.useState<string | null>(null);
+  const [scriptId, setScriptId] = React.useState<string | null>(null);
+  const [cameFromScript, setCameFromScript] = React.useState<boolean>(false);
 
-  // When arriving here, mark that we came from script if there is text
+  // Load script and existing voiceovers by projectId from URL
   React.useEffect(() => {
-    if (!hydrated) {
-      return;
+    const pid = searchParams.get('projectId');
+    setProjectId(pid);
+    async function load() {
+      if (!pid) return;
+      setLoadingExisting(true);
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+      
+      // Load project and script data
+      const res = await fetch(`/api/projects/${pid}`, {
+        headers: { 'Authorization': `Bearer ${session.access_token}` }
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      const script = data?.script;
+      if (script) {
+        setScriptId(script.id);
+        const content = script.edited_script || script.raw_script || '';
+        setRawScript(content);
+        setCameFromScript(!!content.trim());
+      }
+
+      // Load existing voiceovers for this project
+      try {
+        const voiceoversRes = await fetch(`/api/voiceover/project/${pid}`, {
+          headers: { 'Authorization': `Bearer ${session.access_token}` }
+        });
+        if (voiceoversRes.ok) {
+          const voiceoversData = await voiceoversRes.json();
+          const voiceovers = voiceoversData.voiceovers || [];
+          
+          // If there are existing voiceovers, load the most recent one
+          if (voiceovers.length > 0) {
+            const latestVoiceover = voiceovers[0]; // Already sorted by created_at desc
+            if (latestVoiceover.audio_data_url) {
+              setAudioDataUrl(latestVoiceover.audio_data_url);
+              setHasGeneratedVoiceover(true);
+              setAudioReady(false);
+              console.log('Loaded existing voiceover:', latestVoiceover.id);
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Failed to load existing voiceovers:', error);
+        // Don't show error to user, just continue without existing voiceover
+      } finally {
+        setLoadingExisting(false);
+      }
     }
-    if (rawScript && rawScript.trim().length > 0) {
-      setVoiceoverState({ cameFromScript: true });
-    }
-  }, [hydrated, rawScript, setVoiceoverState]);
+    load();
+  }, [searchParams]);
 
   // Note: Do NOT prefill editedScript with raw on load.
   // Showing sanitized by default avoids confusing unsanitized content on arrival.
   // Also, do NOT auto-save edits back to store here; only save on explicit action.
 
   // Handle saving edited script
-  const handleSaveScript = () => {
-    if (editedScript.trim().length > 0) {
-      setScriptState({ editableScript: editedScript });
-    }
-  };
+  const handleSaveScript = () => {};
 
   // Always compute sanitized from the latest raw + any local edits
   const sanitizedScript = useMemo(
@@ -57,36 +99,41 @@ export default function VoiceoverPage() {
     console.log('Voiceover page - rawScript:', rawScript?.substring(0, 100) + '...');
     console.log('Voiceover page - editedScript:', editedScript?.substring(0, 100) + '...');
     console.log('Voiceover page - sanitizedScript:', sanitizedScript?.substring(0, 100) + '...');
-    console.log('Voiceover page - hydrated:', hydrated);
-  }, [rawScript, editedScript, sanitizedScript, hydrated]);
-  const audioSrc: string | undefined =
-    (audioUrl ?? undefined) || (audioDataUrl ?? undefined);
+  }, [rawScript, editedScript, sanitizedScript]);
+  const audioSrc: string | undefined = (audioUrl ?? undefined) || (audioDataUrl ?? undefined);
 
   const onGenerate = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     setHasGeneratedVoiceover(false);
-    setVoiceoverState({ audioUrl: null });
+    setAudioUrl(null);
+    setAudioReady(false);
     setLoading(true);
     try {
       const textForTts = scriptForVoiceover?.trim() ?? '';
-      const blob = await generateVoiceoverSync(textForTts, 'voiceover.wav');
-      const url = URL.createObjectURL(blob);
-      // Also persist the audio as data URL so it survives reloads/back nav
-      const arrayBuffer = await blob.arrayBuffer();
-      const bytes = new Uint8Array(arrayBuffer);
-      let binary = '';
-      for (let i = 0; i < bytes.byteLength; i++) {
-        binary += String.fromCharCode(bytes[i]);
-      }
-      const base64 = typeof window !== 'undefined' ? window.btoa(binary) : '';
-      const mime = blob.type || 'audio/wav';
-      const dataUrl = `data:${mime};base64,${base64}`;
-      // Store base64 only if it fits typical localStorage limits
-      const maxBytes = 4_500_000; // ~4.5MB safety cap
-      const audioDataUrl = base64.length * 0.75 < maxBytes ? dataUrl : null;
-      setVoiceoverState({ audioUrl: url, audioDataUrl });
+      const result = await generateVoiceoverSync(textForTts, 'voiceover.wav', { projectId: projectId || undefined, scriptId: scriptId || undefined, voice_id: 'default', model_id: 'system_tts' });
+      
+      const url = URL.createObjectURL(result.blob);
+      setAudioUrl(url);
+      setAudioDataUrl(result.audioDataUrl);
       setHasGeneratedVoiceover(true);
+
+      // Update project current_step to 'voiceover' after successful generation
+      if (projectId) {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session) {
+          await fetch(`/api/projects/${projectId}`, {
+            method: 'PUT',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${session.access_token}`
+            },
+            body: JSON.stringify({
+              status: 'voiceover'
+            })
+          });
+        }
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to generate';
       setError(msg);
@@ -99,19 +146,7 @@ export default function VoiceoverPage() {
     <main className="min-h-screen bg-slate-50">
       <div className="container mx-auto px-4 py-8">
         <div className="max-w-4xl mx-auto">
-          <div className="flex items-center justify-between mb-8">
-            <button
-              onClick={() => router.push('/script')}
-              className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-lg font-medium transition-colors flex items-center space-x-2"
-            >
-              <span>←</span>
-              <span>Back to Script</span>
-            </button>
-            <h1 className="text-4xl font-bold text-slate-900">
-              🎙️ Voice Generation
-            </h1>
-            <div className="w-32"></div> {/* Spacer for centering */}
-          </div>
+          <h1 className="text-3xl font-bold text-slate-900 mb-8 text-center">🎙️ Voice Generation</h1>
 
           {cameFromScript && (
             <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-6">
@@ -196,11 +231,22 @@ export default function VoiceoverPage() {
             </div>
           )}
 
+          {(loadingExisting || (hasGeneratedVoiceover && audioSrc && !audioReady)) && (
+            <div className="bg-white rounded-lg border border-slate-200 p-6 shadow-sm mb-4">
+              <h3 className="text-lg font-semibold text-slate-900 mb-4 flex items-center">
+                <div className="animate-spin h-4 w-4 border-2 border-slate-700 border-t-transparent rounded-full mr-2"></div>
+                Preparing your voiceover...
+              </h3>
+              <div className="w-full h-12 rounded-lg bg-slate-100 animate-pulse" />
+              <p className="text-sm text-slate-500 mt-3">This can take a few seconds the first time while audio loads.</p>
+            </div>
+          )}
+
           {hasGeneratedVoiceover && audioSrc && (
             <div className="bg-white rounded-lg border border-slate-200 p-6 shadow-sm">
               <h3 className="text-lg font-semibold text-slate-900 mb-4 flex items-center">
-                <span className="mr-2">✅</span>
-                Voiceover Generated Successfully
+                {audioReady ? <span className="mr-2">✅</span> : <div className="animate-spin h-4 w-4 border-2 border-slate-700 border-t-transparent rounded-full mr-2"></div>}
+                {audioReady ? 'Voiceover Ready' : 'Loading audio...'}
               </h3>
 
               <div className="space-y-4">
@@ -213,6 +259,7 @@ export default function VoiceoverPage() {
                       backgroundColor: 'transparent',
                       borderRadius: '8px',
                     }}
+                    onCanPlayThrough={() => setAudioReady(true)}
                   />
                 </div>
 

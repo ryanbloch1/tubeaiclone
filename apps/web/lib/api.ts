@@ -14,7 +14,11 @@ export async function getHealth(): Promise<HealthResponse> {
   return res.json();
 }
 
-export async function generateVoiceoverSync(script: string, filename?: string): Promise<Blob> {
+export async function generateVoiceoverSync(
+  script: string,
+  filename?: string,
+  opts?: { projectId?: string; scriptId?: string; voice_id?: string; model_id?: string; format?: 'wav' | 'mp3' }
+): Promise<{ blob: Blob; audioDataUrl: string; voiceoverId: string }> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 60_000);
   try {
@@ -22,14 +26,41 @@ export async function generateVoiceoverSync(script: string, filename?: string): 
     const resp = await fetch(`/api/voiceover/generate`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ script, filename: filename || "voiceover.wav" }),
+      body: JSON.stringify({
+        script,
+        filename: filename || "voiceover.wav",
+        project_id: opts?.projectId,
+        script_id: opts?.scriptId,
+        voice_id: opts?.voice_id,
+        model_id: opts?.model_id,
+        format: opts?.format,
+      }),
       signal: controller.signal,
     });
     if (!resp.ok) {
       const errText = await resp.text().catch(() => "");
       throw new Error(`Sync generation failed: ${resp.status} ${errText}`);
     }
-    return resp.blob();
+    
+    const data = await resp.json();
+    if (!data.audio_blob || !data.audio_data_url) {
+      throw new Error('Invalid response format');
+    }
+    
+    // Convert base64 back to blob
+    const base64 = data.audio_blob;
+    const binaryString = atob(base64);
+    const bytes = new Uint8Array(binaryString.length);
+    for (let i = 0; i < binaryString.length; i++) {
+      bytes[i] = binaryString.charCodeAt(i);
+    }
+    const blob = new Blob([bytes], { type: 'audio/wav' });
+    
+    return {
+      blob,
+      audioDataUrl: data.audio_data_url,
+      voiceoverId: data.voiceover_id
+    };
   } finally {
     clearTimeout(timeoutId);
   }
