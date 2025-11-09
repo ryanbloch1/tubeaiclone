@@ -46,8 +46,12 @@ app.add_middleware(
 try:
     from routes.script import router as script_router
     from routes.voiceover import router as voiceover_router
+    from routes.images import router as images_router
+    from routes.video import router as video_router
     app.include_router(script_router)
     app.include_router(voiceover_router, prefix="/api/voiceover")
+    app.include_router(images_router, prefix="/api/images")
+    app.include_router(video_router, prefix="/api/video")
     print("✅ Loaded Supabase-integrated routes")
 except ImportError as e:
     print(f"⚠️  Supabase routes not available: {e}")

@@ -76,8 +76,20 @@ async def generate_script_with_gemini(
         
         # Generate content
         response = model.generate_content(prompt)
+        text = response.text
         
-        return response.text
+        # Strip any intro text before the first Scene
+        # Find the first occurrence of "Scene 1" or "Scene 1:" (case insensitive)
+        import re
+        scene_match = re.search(r'Scene\s+1[\s:]', text, re.IGNORECASE)
+        if scene_match:
+            scene_index = scene_match.start()
+            if scene_index > 0:
+                # Remove everything before the first Scene
+                text = text[scene_index:]
+                print(f'Removed intro text, script now starts with: {text[:50]}...')
+        
+        return text
         
     except ImportError:
         # Fallback if google-generativeai not installed
@@ -161,6 +173,12 @@ Scene [Number] ([Start Time]-[End Time]): [A catchy, 3-5 word title for the scen
 **Content/Narration:** [2–4 sentences of speakable narration (~{per_scene_words} words), clear, conversational, and free of stage directions.]
 **Visuals:** [One brief sentence describing the key shot(s).]
 ---
+
+**CRITICAL:**
+- Start IMMEDIATELY with "Scene 1" - do NOT include any introduction, explanation, or meta-commentary before the scenes.
+- Do NOT write phrases like "Okay, here's a YouTube script" or "Here's a script designed to be..." 
+- Begin directly with the first scene's narration content.
+- The script should start with the actual narration that will be spoken, not any commentary about the script.
 
 **TOPIC:** {topic}
 """

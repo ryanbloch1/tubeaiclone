@@ -112,10 +112,13 @@ export async function PUT(
     }
 
     // Validate incoming data (e.g., only allow updating specific fields)
-    const { status } = body;
-    const updateData: { status?: string } = {};
+    const { status, style } = body;
+    const updateData: { status?: string; style?: string | null } = {};
     if (status && ['draft', 'script', 'voiceover', 'images', 'complete'].includes(status)) {
       updateData.status = status;
+    }
+    if (typeof style === 'string') {
+      updateData.style = style.trim() || null;
     }
 
     if (Object.keys(updateData).length === 0) {

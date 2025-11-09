@@ -90,21 +90,6 @@ export default function Home() {
       <div className="container mx-auto px-4 py-12">
         {/* Recent Projects / Continue where you left off */}
         <RecentProjects />
-
-        <div className="max-w-4xl mx-auto text-center mt-16">
-          <div className="mt-16 text-center">
-            <h3 className="text-2xl font-semibold text-slate-900 mb-4">Complete Video Creation Pipeline</h3>
-            <div className="flex justify-center items-center space-x-4 text-slate-500">
-              <span className="bg-blue-50 border-blue-200 border px-4 py-2 rounded-lg text-blue-700">Script</span>
-              <span>→</span>
-              <span className="bg-purple-50 border-purple-200 border px-4 py-2 rounded-lg text-purple-700">Voice</span>
-              <span>→</span>
-              <span className="bg-green-50 border-green-200 border px-4 py-2 rounded-lg text-green-700">Images</span>
-              <span>→</span>
-              <span className="bg-orange-50 border-orange-200 border px-4 py-2 rounded-lg text-orange-700">Video</span>
-            </div>
-          </div>
-        </div>
       </div>
     </main>
   );

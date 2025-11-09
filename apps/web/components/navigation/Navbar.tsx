@@ -18,9 +18,6 @@ export default function Navbar() {
 
   const navItems = [
     { href: '/', label: 'Home', icon: '🏠' },
-    { href: '/script', label: 'Scripts', icon: '📝' },
-    { href: '/voiceover', label: 'Voiceover', icon: '🎙️' },
-    { href: '/images', label: 'Images', icon: '🎨' },
   ];
 
   return (

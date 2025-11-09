@@ -8,6 +8,14 @@ import { TitleBar } from "./ui/TitleBar";
 import { ContextModal } from "./ui/ContextModal";
 import { StyleModal } from "./ui/StyleModal";
 
+const STYLE_PRESETS = [
+  { value: 'Photorealistic', label: 'Photorealistic Cinematic' },
+  { value: 'Comic Book', label: 'Comic Book Illustration' },
+  { value: 'Studio Ghibli', label: 'Studio Ghibli Animation' },
+  { value: 'Cyberpunk Neon', label: 'Cyberpunk Neon' },
+  { value: 'Watercolor Storybook', label: 'Watercolor Storybook' },
+];
+
 type ScriptResponse = { 
   script?: string; 
   scriptId?: string;
@@ -57,7 +65,9 @@ function ScriptPageContent() {
   const [editableScript, setEditableScript] = useState('');
 
   // Projects state
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [projects, setProjects] = useState<Project[]>([]);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
 
   // UI state
@@ -93,20 +103,15 @@ function ScriptPageContent() {
     }
   }, [session, loadProjects]);
 
-  // Load project from URL parameters
+  // Ensure we always have a default style selected
   useEffect(() => {
-    if (session && typeof window !== 'undefined') {
-      const urlParams = new URLSearchParams(window.location.search);
-      const projectIdParam = urlParams.get('projectId');
-      if (projectIdParam && projectIdParam !== projectId) {
-        setProjectId(projectIdParam);
-        loadProject(projectIdParam);
-      }
+    if (!style) {
+      setStyle(STYLE_PRESETS[0]?.value || 'Photorealistic');
     }
-  }, [session, projectId]);
+  }, [style]);
 
   // Load a specific project
-  const loadProject = async (id: string) => {
+  const loadProject = useCallback(async (id: string) => {
     try {
       const response = await fetch(`/api/projects/${id}`, {
         headers: {
@@ -120,7 +125,7 @@ function ScriptPageContent() {
         
         // Populate form fields
         setTopic(project.topic || '');
-        setStyle(project.style || '');
+        setStyle(project.style || STYLE_PRESETS[0]?.value || 'Photorealistic');
         setMode(project.mode || 'script');
         setTemperature(project.temperature || 0.7);
         setWordCount(project.word_count || 500);
@@ -145,7 +150,19 @@ function ScriptPageContent() {
     } catch (error) {
       console.error('Failed to load project:', error);
     }
-  };
+  }, [session?.access_token]);
+
+  // Load project from URL parameters
+  useEffect(() => {
+    if (session && typeof window !== 'undefined') {
+      const urlParams = new URLSearchParams(window.location.search);
+      const projectIdParam = urlParams.get('projectId');
+      if (projectIdParam && projectIdParam !== projectId) {
+        setProjectId(projectIdParam);
+        loadProject(projectIdParam);
+      }
+    }
+  }, [session, projectId, loadProject]);
 
   // Save script edits
   const saveScript = async () => {
@@ -203,7 +220,7 @@ function ScriptPageContent() {
         },
         body: JSON.stringify({
           topic,
-          style: style || undefined,
+          style: style || STYLE_PRESETS[0]?.value,
           mode,
           temperature,
           wordCount,
@@ -261,20 +278,51 @@ function ScriptPageContent() {
           <h1 className="text-3xl font-bold text-slate-900 mb-8 text-center">Script Generation</h1>
           
           <form onSubmit={onSubmit} className="space-y-4">
-          <TitleBar
-            topic={topic}
-            setTopic={setTopic}
-            videoLength={videoLength}
-            onVideoLengthChange={setVideoLength}
-            onOpenContextModal={() => setShowContextModal(true)}
-            onOpenStyleModal={() => setShowStyleModal(true)}
-            loading={loading}
-            canSubmit={!!topic.trim()}
-          />
-          <div className="text-sm text-slate-500 pl-4">
-            Credits remaining: 0  |  Estimated script credits: 0
-          </div>
-        </form>
+            <TitleBar
+              topic={topic}
+              setTopic={setTopic}
+              videoLength={videoLength}
+              onVideoLengthChange={setVideoLength}
+              onOpenContextModal={() => setShowContextModal(true)}
+              onOpenStyleModal={() => setShowStyleModal(true)}
+              loading={loading}
+              canSubmit={!!topic.trim()}
+            />
+            <div className="text-sm text-slate-500 pl-4">
+              Credits remaining: 0  |  Estimated script credits: 0
+            </div>
+
+            <div className="mt-6 bg-white border border-slate-200 rounded-lg shadow-sm p-6 space-y-4">
+              <div>
+                <label htmlFor="visual-style" className="block text-sm font-medium text-slate-700 mb-2">
+                  Visual Style
+                </label>
+                <p className="text-xs text-slate-500 mb-3">
+                  Choose a consistent visual style to apply across your script and generated images.
+                </p>
+                <select
+                  id="visual-style"
+                  value={style}
+                  onChange={(e) => setStyle(e.target.value)}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition"
+                >
+                  {STYLE_PRESETS.map((preset) => (
+                    <option key={preset.value} value={preset.value}>
+                      {preset.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setShowStyleModal(true)}
+                className="inline-flex items-center text-sm text-blue-600 hover:text-blue-700 font-medium transition-colors"
+              >
+                Customize or add a new style →
+              </button>
+            </div>
+          </form>
         </div>
 
         {error && (

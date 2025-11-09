@@ -41,24 +41,38 @@ def verify_token(credentials: HTTPAuthorizationCredentials = Security(security))
         HTTPException: If token is invalid or expired
     """
     try:
+        if not SUPABASE_URL or not SUPABASE_KEY:
+            print(f"[AUTH] ERROR: Supabase credentials not configured. URL: {bool(SUPABASE_URL)}, KEY: {bool(SUPABASE_KEY)}")
+            raise HTTPException(
+                status_code=500,
+                detail="Authentication service not configured",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        
         token = credentials.credentials
+        print(f"[AUTH] Verifying token (length: {len(token)} chars)")
         
         # Verify the token with Supabase
         user = auth_client.get_user(token)
         
         if not user or not user.user:
+            print(f"[AUTH] ERROR: Invalid user response from Supabase")
             raise HTTPException(
                 status_code=401,
                 detail="Invalid authentication credentials",
                 headers={"WWW-Authenticate": "Bearer"},
             )
         
+        print(f"[AUTH] ✓ Token verified for user: {user.user.id}")
         return user.user.id
         
     except HTTPException:
         raise
     except Exception as e:
-        print(f"Token verification error: {str(e)}")
+        error_msg = str(e)
+        print(f"[AUTH] ERROR: Token verification failed: {error_msg}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(
             status_code=401,
             detail="Could not validate credentials",

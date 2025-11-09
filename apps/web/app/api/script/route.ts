@@ -138,6 +138,12 @@ Scene [Number] ([Start Time]-[End Time]): [A catchy, 3-5 word title for the scen
 **Visuals:** [One brief sentence describing the key shot(s).]
 ---
 
+**CRITICAL:**
+- Start IMMEDIATELY with "Scene 1" - do NOT include any introduction, explanation, or meta-commentary before the scenes.
+- Do NOT write phrases like "Okay, here's a YouTube script" or "Here's a script designed to be..." 
+- Begin directly with the first scene's narration content.
+- The script should start with the actual narration that will be spoken, not any commentary about the script.
+
 **TOPIC:** ${topic}
 `;
     }
@@ -158,11 +164,20 @@ Scene [Number] ([Start Time]-[End Time]): [A catchy, 3-5 word title for the scen
 
     console.log('Prompt sent to Gemini API:', prompt.substring(0, 200) + '...');
     const result = await model.generateContent(prompt);
-    const text = result.response.text();
+    let text = result.response.text();
     console.log(
       'Text response from Gemini API (first 200 chars):',
       text.substring(0, 200) + '...'
     );
+    
+    // Strip any intro text before the first Scene
+    // Find the first occurrence of "Scene 1" or "Scene 1:" (case insensitive)
+    const sceneMatch = text.match(/(Scene\s+1[\s:])/i);
+    if (sceneMatch && sceneMatch.index !== undefined && sceneMatch.index > 0) {
+      // Remove everything before the first Scene
+      text = text.substring(sceneMatch.index);
+      console.log('Removed intro text, script now starts with:', text.substring(0, 50) + '...');
+    }
 
     return NextResponse.json({
       text,

@@ -1,72 +1,39 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 
-type ImageRequest = {
-  prompt: string;
-  scene_number: number;
-};
-
-export async function POST(request: NextRequest) {
-  let parsed: ImageRequest | null = null;
+export async function POST(req: NextRequest) {
   try {
-    parsed = await request.json();
+    const body = await req.json();
+    const auth = req.headers.get('authorization') || '';
     
-    if (!parsed?.prompt || !parsed?.scene_number) {
-      return NextResponse.json(
-        { error: 'Prompt and scene_number are required' },
-        { status: 400 }
-      );
+    // Forward the streaming request to FastAPI
+    const resp = await fetch('http://127.0.0.1:8000/api/images/generate', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: auth,
+      },
+      body: JSON.stringify(body),
+    });
+    
+    if (!resp.ok) {
+      const errorText = await resp.text();
+      return new Response(errorText, { status: resp.status });
     }
-
-    // Use local Stable Diffusion API
-    const apiBase = process.env.API_BASE || process.env.NEXT_PUBLIC_API_BASE || 'http://127.0.0.1:8000';
     
-    // Add timeout and retry logic
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 120000); // 2 minute timeout
-    
-    try {
-      const sdResp = await fetch(`${apiBase}/images/sd/generate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          prompt: parsed.prompt,
-          scene_number: parsed.scene_number,
-          width: 512,
-          height: 512
-        }),
-        signal: controller.signal
-      });
-
-      clearTimeout(timeoutId);
-
-      if (!sdResp.ok) {
-        const errorText = await sdResp.text();
-        console.error(`Local SD error ${sdResp.status}:`, errorText);
-        throw new Error(`Local SD error: ${sdResp.status} - ${errorText}`);
-      }
-
-      const json = await sdResp.json();
-      return NextResponse.json({
-        success: true,
-        image_url: json.image_url,
-        scene_number: parsed.scene_number
-      });
-    } catch (error) {
-      clearTimeout(timeoutId);
-      if (error instanceof Error && error.name === 'AbortError') {
-        throw new Error('Image generation timeout - please try again');
-      }
-      throw error;
-    }
-
-  } catch (error) {
-    console.error('Image generation error:', error);
-    
-    // Return a mock success for now until the backend is set up
-    return NextResponse.json({
-      success: true,
-      image_url: `https://picsum.photos/512/512?random=${parsed?.scene_number ?? 0}`,
-      scene_number: parsed?.scene_number ?? 0
+    // Return the streaming response directly
+    return new Response(resp.body, {
+      status: resp.status,
+      headers: {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+        'X-Accel-Buffering': 'no',
+      },
+    });
+  } catch (e: any) {
+    return new Response(JSON.stringify({ error: e?.message || 'Failed to generate images' }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' },
     });
   }
 }

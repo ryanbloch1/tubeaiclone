@@ -277,7 +277,13 @@ export default function VoiceoverPage() {
                       <span>Download WAV</span>
                     </a>
                     <button
-                      onClick={() => router.push('/images')}
+                      onClick={() => {
+                        if (projectId) {
+                          router.push(`/images?projectId=${projectId}`);
+                        } else {
+                          router.push('/images');
+                        }
+                      }}
                       className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg font-medium transition-colors flex items-center space-x-2"
                     >
                       <span>🎨</span>
