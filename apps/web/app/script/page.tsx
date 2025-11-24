@@ -346,7 +346,7 @@ function ScriptPageContent() {
                 Edit script
               </label>
               <textarea
-                className="w-full rounded-lg border border-slate-300 p-4 text-white bg-slate-800 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-colors resize-none"
+                className="w-full rounded-lg border border-black p-4 text-black bg-white focus:border-black focus:ring-2 focus:ring-black focus:ring-opacity-20 transition-colors resize-none"
                 rows={15}
                 value={editableScript}
                 onChange={(e) => setEditableScript(e.target.value)}

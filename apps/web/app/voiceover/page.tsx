@@ -146,6 +146,27 @@ export default function VoiceoverPage() {
     <main className="min-h-screen bg-slate-50">
       <div className="container mx-auto px-4 py-8">
         <div className="max-w-4xl mx-auto">
+          <div className="mb-6 flex items-center justify-between">
+            <div className="flex items-center space-x-4">
+              {projectId && (
+                <button
+                  onClick={() => router.push(`/script?projectId=${projectId}`)}
+                  className="text-slate-600 hover:text-slate-900 text-sm font-medium flex items-center space-x-1 transition-colors"
+                >
+                  <span>←</span>
+                  <span>Edit Script</span>
+                </button>
+              )}
+              <button
+                onClick={() => router.push('/')}
+                className="text-slate-600 hover:text-slate-900 text-sm font-medium flex items-center space-x-1 transition-colors"
+              >
+                <span>🏠</span>
+                <span>Projects</span>
+              </button>
+            </div>
+          </div>
+
           <h1 className="text-3xl font-bold text-slate-900 mb-8 text-center">🎙️ Voice Generation</h1>
 
           {cameFromScript && (
@@ -169,7 +190,7 @@ export default function VoiceoverPage() {
             <form onSubmit={onGenerate} className="space-y-6">
               <div>
                 <textarea
-                  className="w-full rounded-lg border border-slate-300 p-4 text-slate-900 bg-white resize-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-colors"
+                  className="w-full rounded-lg border border-black p-4 text-black bg-white resize-none focus:border-black focus:ring-2 focus:ring-black focus:ring-opacity-20 transition-colors"
                   rows={12}
                   value={displayScript}
                   onChange={(e) => setEditedScript(e.target.value)}

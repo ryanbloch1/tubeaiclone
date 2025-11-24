@@ -3,15 +3,15 @@ import React from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 
-type DbImage = { 
-  id: string; 
-  scene_id?: string; 
-  image_data_url?: string | null; 
+type DbImage = {
+  id: string;
+  scene_id?: string;
+  image_data_url?: string | null;
   prompt?: string;
   styled_prompt?: string;
   scene_number?: number;
   status?: string;
-  created_at?: string 
+  created_at?: string
 };
 
 export default function ImagesPage() {
@@ -40,6 +40,10 @@ export default function ImagesPage() {
         setError('No project ID provided');
         return;
       }
+      // When (re)loading the page, ensure we are in a "loading from DB" state,
+      // not a "generating" state. This prevents tiles from saying "Generating..."
+      // when we're just fetching existing images.
+      setGenerating(false);
       setLoading(true);
       setError(null);
       try {
@@ -91,20 +95,43 @@ export default function ImagesPage() {
           return;
         }
         const imgData = await imgRes.json();
-        console.log('Loaded images:', imgData);
-      const fetchedImages = imgData.images || [];
-      setImages(fetchedImages);
-      if (fetchedImages.length > 0) {
-        setAdditionalPrompts(prev => {
-          const next = { ...prev };
-          fetchedImages.forEach((img: DbImage) => {
-            if (img.id && !(img.id in next)) {
-              next[img.id] = '';
+        console.log('Loaded images from DB:', imgData);
+        
+        // Defensive check: ensure images is an array
+        const fetchedImages = Array.isArray(imgData.images) ? imgData.images : [];
+        console.log(`Found ${fetchedImages.length} existing images in database`);
+        
+        // Filter out images without image_data_url (incomplete images)
+        const validImages = fetchedImages.filter((img: DbImage) => img.image_data_url);
+        console.log(`Found ${validImages.length} valid images with image_data_url`);
+        
+        // Set images state first
+        setImages(validImages);
+        
+        if (validImages.length > 0) {
+          // Store original base prompts for each image
+          const basePrompts: Record<string, string> = {};
+          validImages.forEach((img: DbImage) => {
+            if (img.id && img.styled_prompt) {
+              basePrompts[img.id] = img.styled_prompt;
             }
           });
-          return next;
-        });
-      }
+          setOriginalBasePrompts(prev => ({ ...prev, ...basePrompts }));
+          
+          // Set additional prompts state
+          setAdditionalPrompts(prev => {
+            const next = { ...prev };
+            validImages.forEach((img: DbImage) => {
+              if (img.id && !(img.id in next)) {
+                next[img.id] = '';
+              }
+            });
+            return next;
+          });
+        }
+        
+        // Set loading to false after images state is set
+        // React will batch these updates, but this ensures images are set before loading completes
         setLoading(false);
       } catch (e: any) {
         console.error('Error loading images page:', e);
@@ -124,26 +151,26 @@ export default function ImagesPage() {
         setError('Not authenticated');
         return;
       }
-      
+
       const resp = await fetch('/api/images/regenerate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
         body: JSON.stringify({ image_id: imageId, prompt: promptOverride })
       });
-      
+
       const responseText = await resp.text();
       if (!resp.ok) {
         let errorMsg = responseText;
         try {
           const errorJson = JSON.parse(responseText);
           errorMsg = errorJson.error || errorJson.detail || responseText;
-        } catch {}
+        } catch { }
         throw new Error(errorMsg || `HTTP ${resp.status}`);
       }
-      
+
       const data = JSON.parse(responseText);
       const updatedImage = data.image;
-      
+
       // Update the image in the list (preserve original base prompt to prevent duplication)
       // Always use the stored original base prompt, never update it from backend response
       const originalBase = originalBasePrompts[imageId];
@@ -154,7 +181,7 @@ export default function ImagesPage() {
           [imageId]: updatedImage.styled_prompt
         }));
       }
-      
+
       setImages(prev => prev.map(img => {
         if (img.id !== imageId) return img;
         return {
@@ -164,7 +191,7 @@ export default function ImagesPage() {
           styled_prompt: originalBase || img.styled_prompt || updatedImage.styled_prompt // always use original, never update
         };
       }));
-      
+
       // Clear the additional prompt for this image after successful regeneration
       setAdditionalPrompts(prev => {
         const next = { ...prev };
@@ -187,8 +214,10 @@ export default function ImagesPage() {
     try {
       setGenerating(true);
       setError(null);
-      setImages([]); // Clear existing images
-      
+      // Clear existing images when starting new generation
+      // New images will replace them as they stream in
+      setImages([]);
+
       // Parse script to get scene count if not already known
       if (!expectedSceneCount && scriptId) {
         const { data: { session } } = await supabase.auth.getSession();
@@ -213,7 +242,7 @@ export default function ImagesPage() {
           }
         }
       }
-      
+
       const { data: { session } } = await supabase.auth.getSession();
       if (!session || !projectId) {
         setError('Not authenticated or no project ID');
@@ -225,53 +254,53 @@ export default function ImagesPage() {
         setGenerating(false);
         return;
       }
-      
+
       console.log('Generating images with:', { project_id: projectId, script_id: scriptId });
-      
+
       // Use fetch with streaming response
-          const resp = await fetch('/api/images/generate', {
+      const resp = await fetch('/api/images/generate', {
         method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json', 
+        headers: {
+          'Content-Type': 'application/json',
           Authorization: `Bearer ${session.access_token}`,
           Accept: 'text/event-stream'
         },
-            body: JSON.stringify({ 
-              project_id: projectId, 
-              script_id: scriptId,
-              style_name: styleName || 'Photorealistic'
-            })
+        body: JSON.stringify({
+          project_id: projectId,
+          script_id: scriptId,
+          style_name: styleName || 'Photorealistic'
+        })
       });
-      
+
       if (!resp.ok) {
         const errorText = await resp.text();
         let errorMsg = errorText;
         try {
           const errorJson = JSON.parse(errorText);
           errorMsg = errorJson.error || errorJson.detail || errorText;
-        } catch {}
+        } catch { }
         throw new Error(errorMsg || `HTTP ${resp.status}`);
       }
-      
+
       // Read streaming response
       const reader = resp.body?.getReader();
       const decoder = new TextDecoder();
-      
+
       if (!reader) {
         throw new Error('No response body');
       }
-      
+
       let buffer = '';
       const newImages: DbImage[] = [];
-      
+
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-        
+
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split('\n');
         buffer = lines.pop() || ''; // Keep incomplete line in buffer
-        
+
         for (const line of lines) {
           if (line.startsWith('data: ')) {
             try {
@@ -286,14 +315,14 @@ export default function ImagesPage() {
                 console.log('Image generation complete:', data.count);
                 setImages(data.images || newImages);
                 setExpectedSceneCount(null); // Clear expected count
-                
+
                 // Update project status
                 try {
                   await fetch(`/api/projects/${projectId}`, {
                     method: 'PUT',
-                    headers: { 
-                      'Content-Type': 'application/json', 
-                      Authorization: `Bearer ${(await supabase.auth.getSession()).data.session?.access_token}` 
+                    headers: {
+                      'Content-Type': 'application/json',
+                      Authorization: `Bearer ${(await supabase.auth.getSession()).data.session?.access_token}`
                     },
                     body: JSON.stringify({ status: 'images' })
                   });
@@ -307,11 +336,11 @@ export default function ImagesPage() {
           }
         }
       }
-      
+
       if (newImages.length === 0) {
         throw new Error('No images generated');
       }
-      
+
     } catch (e: any) {
       console.error('Error generating images:', e);
       setError(e?.message || 'Failed to generate images. Check the browser console for details.');
@@ -352,23 +381,30 @@ export default function ImagesPage() {
         <div className="max-w-6xl mx-auto">
           <h1 className="text-3xl font-bold text-slate-900 mb-6">🎨 Images</h1>
 
-          <div className="bg-white rounded-lg border border-slate-200 p-6 shadow-sm mb-6">
-            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-              <div className="flex-1">
-                <h2 className="text-lg font-semibold text-slate-900 mb-2">Generate Scene Images</h2>
-                <p className="text-slate-600 text-sm">
-                  Images will be automatically generated for each scene in your script based on the visual descriptions.
-                </p>
+          {/* Show generate/regenerate button - only when loading is complete */}
+          {!loading && (
+            <div className="bg-white rounded-lg border border-slate-200 p-6 shadow-sm mb-6">
+              <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+                <div className="flex-1">
+                  <h2 className="text-lg font-semibold text-slate-900 mb-2">
+                    {images.length > 0 ? 'Regenerate Scene Images' : 'Generate Scene Images'}
+                  </h2>
+                  <p className="text-slate-600 text-sm">
+                    {images.length > 0 
+                      ? 'Regenerate all images for each scene in your script.'
+                      : 'Images will be automatically generated for each scene in your script based on the visual descriptions.'}
+                  </p>
+                </div>
+                <button
+                  onClick={onGenerate}
+                  disabled={generating || !projectId || !scriptId}
+                  className="bg-green-600 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed text-white px-6 py-3 rounded-lg font-semibold transition-colors whitespace-nowrap"
+                >
+                  {generating ? 'Generating...' : images.length > 0 ? 'Regenerate All Images' : 'Generate Images'}
+                </button>
               </div>
-              <button
-                onClick={onGenerate}
-                disabled={generating || !projectId || !scriptId}
-                className="bg-green-600 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed text-white px-6 py-3 rounded-lg font-semibold transition-colors whitespace-nowrap"
-              >
-                {generating ? 'Generating...' : 'Generate Images'}
-              </button>
             </div>
-          </div>
+          )}
 
           {error && (
             <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
@@ -382,124 +418,142 @@ export default function ImagesPage() {
                 <div key={i} className="aspect-video bg-slate-200 animate-pulse rounded" />
               ))}
             </div>
+          ) : !loading && !generating && images.length === 0 ? (
+            <div className="text-center py-16 bg-white border border-dashed border-slate-300 rounded-lg">
+              <div className="text-5xl mb-3">🖼️</div>
+              <h3 className="text-lg font-semibold text-slate-900 mb-2">No images yet</h3>
+              <p className="text-slate-600 mb-6">Click the button above to generate images for each scene in your script.</p>
+              <button
+                onClick={onGenerate}
+                disabled={generating || !projectId}
+                className="bg-green-600 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed text-white px-6 py-3 rounded-lg font-semibold transition-colors"
+              >
+                {generating ? 'Generating...' : 'Generate Starter Set'}
+              </button>
+            </div>
           ) : (
-            images.length === 0 ? (
-              <div className="text-center py-16 bg-white border border-dashed border-slate-300 rounded-lg">
-                <div className="text-5xl mb-3">🖼️</div>
-                <h3 className="text-lg font-semibold text-slate-900 mb-2">No images yet</h3>
-                <p className="text-slate-600 mb-6">Click the button above to generate images for each scene in your script.</p>
-                <button
-                  onClick={onGenerate}
-                  disabled={generating || !projectId}
-                  className="bg-green-600 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed text-white px-6 py-3 rounded-lg font-semibold transition-colors"
-                >
-                  {generating ? 'Generating...' : 'Generate Starter Set'}
-                </button>
-              </div>
-            ) : (
-              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-                {/* Show loader tiles for expected scenes, then replace with actual images */}
-                {Array.from({ length: expectedSceneCount || images.length || 8 }).map((_, index) => {
-                  const sceneNumber = index + 1;
-                  const image = images.find(img => img.scene_number === sceneNumber);
-                  
-                  return (
-                    <div key={image?.id || `loader-${sceneNumber}`} className="bg-white border border-slate-200 rounded-lg overflow-hidden shadow-sm relative group">
-                      {image?.image_data_url ? (
-                        <img src={image.image_data_url} alt={image.prompt || `Scene ${image.scene_number || sceneNumber}`} className="w-full h-auto" />
-                      ) : (
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+              {/* Show loader tiles for expected scenes, then replace with actual images */}
+              {Array.from({ length: expectedSceneCount || images.length || 8 }).map((_, index) => {
+                const sceneNumber = index + 1;
+                const image = images.find(img => img.scene_number === sceneNumber);
+
+                return (
+                  <div key={image?.id || `loader-${sceneNumber}`} className="bg-white border border-slate-200 rounded-lg overflow-hidden shadow-sm relative group">
+                    {(() => {
+                      if (image?.image_data_url) {
+                        return (
+                          <img
+                            src={image.image_data_url}
+                            alt={image.prompt || `Scene ${image.scene_number || sceneNumber}`}
+                            className="w-full h-auto"
+                          />
+                        );
+                      }
+                      if (generating) {
+                        return (
+                          <div className="aspect-video bg-slate-100 flex items-center justify-center">
+                            <div className="flex flex-col items-center gap-2">
+                              <div className="h-8 w-8 rounded-full border-4 border-slate-200 border-t-blue-500 animate-spin" />
+                              <div className="text-slate-400 text-xs">Scene {sceneNumber}</div>
+                              <div className="text-slate-400 text-xs">Generating…</div>
+                            </div>
+                          </div>
+                        );
+                      }
+                      return (
                         <div className="aspect-video bg-slate-200 animate-pulse flex items-center justify-center">
                           <div className="text-center">
                             <div className="text-slate-400 text-xs mb-1">Scene {sceneNumber}</div>
-                            <div className="text-slate-400 text-xs">{generating ? 'Generating...' : 'Loading...'}</div>
+                            <div className="text-slate-400 text-xs">Loading…</div>
                           </div>
                         </div>
-                      )}
-                      {/* Regenerate button - shows on hover when image exists */}
-                      {image?.image_data_url && (
+                      );
+                    })()}
+                    {/* Regenerate button - shows on hover when image exists */}
+                    {image?.image_data_url && (
+                      <button
+                        onClick={() => {
+                          const basePrompt = originalBasePrompts[image.id] || image.styled_prompt || 'Photorealistic cinematic lighting, ultra-detailed.';
+                          const addition = additionalPrompts[image.id] || '';
+                          const combinedPrompt = [basePrompt, addition.trim()].filter(Boolean).join(' ');
+                          onRegenerateImage(image.id, combinedPrompt || basePrompt);
+                        }}
+                        disabled={regeneratingIds.has(image.id)}
+                        className="absolute top-2 right-2 bg-black/70 hover:bg-black/90 disabled:opacity-50 text-white px-3 py-1.5 rounded-lg text-xs font-medium transition-opacity opacity-0 group-hover:opacity-100 disabled:cursor-not-allowed"
+                        title="Regenerate this image"
+                      >
+                        {regeneratingIds.has(image.id) ? 'Generating...' : '🔄 Regenerate'}
+                      </button>
+                    )}
+                    {(image?.scene_number || image?.prompt) && (
+                      <div className="p-2 bg-slate-50 border-t border-slate-200">
+                        {image.scene_number && (
+                          <div className="text-xs font-semibold text-slate-600 mb-1">Scene {image.scene_number}</div>
+                        )}
                         <button
+                          type="button"
                           onClick={() => {
-                            const basePrompt = originalBasePrompts[image.id] || image.styled_prompt || 'Photorealistic cinematic lighting, ultra-detailed.';
-                            const addition = additionalPrompts[image.id] || '';
-                            const combinedPrompt = [basePrompt, addition.trim()].filter(Boolean).join(' ');
-                            onRegenerateImage(image.id, combinedPrompt || basePrompt);
-                          }}
-                          disabled={regeneratingIds.has(image.id)}
-                          className="absolute top-2 right-2 bg-black/70 hover:bg-black/90 disabled:opacity-50 text-white px-3 py-1.5 rounded-lg text-xs font-medium transition-opacity opacity-0 group-hover:opacity-100 disabled:cursor-not-allowed"
-                          title="Regenerate this image"
-                        >
-                          {regeneratingIds.has(image.id) ? 'Generating...' : '🔄 Regenerate'}
-                        </button>
-                      )}
-                      {(image?.scene_number || image?.prompt) && (
-                        <div className="p-2 bg-slate-50 border-t border-slate-200">
-                          {image.scene_number && (
-                            <div className="text-xs font-semibold text-slate-600 mb-1">Scene {image.scene_number}</div>
-                          )}
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setExpandedIds(prev => {
-                                const next = new Set(prev);
-                                if (image?.id) {
-                                  if (next.has(image.id)) {
-                                    next.delete(image.id);
-                                  } else {
-                                    next.add(image.id);
-                                  }
+                            setExpandedIds(prev => {
+                              const next = new Set(prev);
+                              if (image?.id) {
+                                if (next.has(image.id)) {
+                                  next.delete(image.id);
+                                } else {
+                                  next.add(image.id);
                                 }
-                                return next;
-                              });
-                            }}
-                            className="text-xs text-blue-600 hover:text-blue-700 font-medium mb-2"
-                          >
-                            {expandedIds.has(image?.id || '') ? 'Hide prompt editor' : 'Edit prompt details'}
-                          </button>
-                          {expandedIds.has(image?.id || '') && image?.id && (
-                            <div className="space-y-2">
-                              <div className="text-xs text-slate-500">
-                                Base prompt:
-                                <div className="mt-1 text-slate-600 bg-white border border-slate-200 rounded p-2">
-                                  {originalBasePrompts[image.id] || image.styled_prompt || 'Photorealistic cinematic lighting, ultra-detailed.'}
-                                </div>
+                              }
+                              return next;
+                            });
+                          }}
+                          className="text-xs text-blue-600 hover:text-blue-700 font-medium mb-2"
+                        >
+                          {expandedIds.has(image?.id || '') ? 'Hide prompt editor' : 'Edit prompt details'}
+                        </button>
+                        {expandedIds.has(image?.id || '') && image?.id && (
+                          <div className="space-y-2">
+                            <div className="text-xs text-slate-500">
+                              Base prompt:
+                              <div className="mt-1 text-slate-600 bg-white border border-slate-200 rounded p-2">
+                                {originalBasePrompts[image.id] || image.styled_prompt || 'Photorealistic cinematic lighting, ultra-detailed.'}
                               </div>
-                              <textarea
-                                className="w-full text-xs border border-slate-300 rounded-lg px-2 py-2 resize-y focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition"
-                                rows={3}
-                                value={additionalPrompts[image.id] ?? ''}
-                                onChange={(e) => {
-                                  const val = e.target.value;
-                                  setAdditionalPrompts(prev => ({
-                                    ...prev,
-                                    [image.id]: val
-                                  }));
-                                }}
-                                placeholder="Add more details to guide the regenerated image..."
-                              />
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  const basePrompt = originalBasePrompts[image.id] || image.styled_prompt || 'Photorealistic cinematic lighting, ultra-detailed.';
-                                  const addition = additionalPrompts[image.id] || '';
-                                  const combinedPrompt = [basePrompt, addition.trim()].filter(Boolean).join(' ');
-                                  onRegenerateImage(image.id, combinedPrompt || basePrompt);
-                                }}
-                                disabled={regeneratingIds.has(image.id)}
-                                className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors"
-                              >
-                                {regeneratingIds.has(image.id) ? 'Regenerating...' : 'Apply & Regenerate'}
-                              </button>
                             </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )
+                            <textarea
+                              className="w-full text-xs border border-black rounded-lg px-2 py-2 bg-white text-black resize-y focus:border-black focus:ring-2 focus:ring-black focus:ring-opacity-20 transition"
+                              rows={3}
+                              value={additionalPrompts[image.id] ?? ''}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setAdditionalPrompts(prev => ({
+                                  ...prev,
+                                  [image.id]: val
+                                }));
+                              }}
+                              placeholder="Add more details to guide the regenerated image..."
+                            />
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const basePrompt = originalBasePrompts[image.id] || image.styled_prompt || 'Photorealistic cinematic lighting, ultra-detailed.';
+                                const addition = additionalPrompts[image.id] || '';
+                                const combinedPrompt = [basePrompt, addition.trim()].filter(Boolean).join(' ');
+                                onRegenerateImage(image.id, combinedPrompt || basePrompt);
+                              }}
+                              disabled={regeneratingIds.has(image.id)}
+                              className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors"
+                            >
+                              {regeneratingIds.has(image.id) ? 'Regenerating...' : 'Apply & Regenerate'}
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           )}
-          
+
           {/* Continue to Video button */}
           {images.length > 0 && !generating && (
             <div className="mt-6 flex justify-center">

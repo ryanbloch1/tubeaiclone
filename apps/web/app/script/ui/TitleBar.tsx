@@ -32,7 +32,7 @@ export const TitleBar: React.FC<Props> = ({
         <span>🔍</span>
       </div>
       <input
-        className="flex-1 bg-transparent px-2 py-2 outline-none text-white placeholder-slate-400"
+        className="flex-1 bg-white px-2 py-2 outline-none text-black border border-black rounded placeholder-black placeholder-opacity-55"
         placeholder="Ten scary stories to fall asleep to"
         value={topic}
         onChange={(e) => setTopic(e.target.value)}

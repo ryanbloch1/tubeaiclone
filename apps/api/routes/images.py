@@ -621,12 +621,12 @@ async def list_images_for_project(project_id: str, user_id: str = Depends(verify
 
         script_id = latest_script.data[0]['id']
         
-        # Get images via scenes
+        # Get images via scenes - ORDER BY scene_number to match video compilation order
         images_res = (
             supabase.table('images')
             .select('*, scenes!inner(scene_number, script_id)')
             .eq('scenes.script_id', script_id)
-            .order('created_at', desc=True)
+            .order('scenes(scene_number)', desc=False)  # Order by scene_number, not created_at
             .limit(24)
             .execute()
         )

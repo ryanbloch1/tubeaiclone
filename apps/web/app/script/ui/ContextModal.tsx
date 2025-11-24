@@ -23,7 +23,7 @@ export const ContextModal: React.FC<ContextModalProps> = ({ open, value, onClose
           </label>
           <textarea
             id="context"
-            className={styles.input}
+            className={styles.textArea}
             value={text}
             onChange={(e) => setText(e.target.value)}
           />

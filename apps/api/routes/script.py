@@ -74,7 +74,7 @@ async def generate_script(
     
     # 2. Generate script using Gemini (delegated to service)
     try:
-        from services.gemini import generate_script_with_gemini
+        from services.script_generation import generate_script_with_gemini
         
         script_content = await generate_script_with_gemini(
             topic=request.topic,
