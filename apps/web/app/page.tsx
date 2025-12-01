@@ -11,12 +11,19 @@ type Project = {
   title: string;
   topic: string | null;
   status: 'draft' | 'script' | 'voiceover' | 'images' | 'complete';
+  // Real estate fields
+  video_type?: 'listing' | 'neighborhood_guide' | 'market_update';
+  property_address?: string;
+  property_type?: string;
+  property_price?: number;
+  bedrooms?: number;
+  bathrooms?: number;
   created_at: string;
   updated_at: string;
 };
 
 export default function Home() {
-  const { user, loading, signOut } = useAuth();
+  const { user, loading } = useAuth();
 
   if (loading) {
     return (
@@ -31,20 +38,21 @@ export default function Home() {
 
   if (!user) {
     return (
-      <main className="min-h-screen bg-slate-50">
-        <div className="container mx-auto px-4 py-12">
-          <div className="max-w-4xl mx-auto text-center">
-            <h1 className="text-5xl font-bold text-slate-900 mb-6">
-              TubeAI Video Creator
+      <main className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-emerald-50">
+        <div className="container mx-auto px-4 py-16">
+          <div className="max-w-5xl mx-auto text-center">
+            <h1 className="text-5xl font-extrabold text-slate-900 mb-4">
+              RealEstate Video Pro
             </h1>
-            <p className="text-xl text-slate-600 mb-12">
-              Create engaging YouTube videos with AI-powered scripts, voiceovers, and visuals
+            <p className="text-xl text-slate-600 mb-10">
+              Turn your property listings into professional videos with AI-generated scripts,
+              voiceovers, and visuals.
             </p>
             
-            <div className="bg-white border border-slate-200 rounded-xl p-8 max-w-md mx-auto">
+            <div className="bg-white/80 backdrop-blur border border-slate-200 rounded-2xl p-8 max-w-md mx-auto shadow-lg">
               <h2 className="text-2xl font-semibold text-slate-900 mb-4">Get Started</h2>
               <p className="text-slate-600 mb-6">
-                Sign in to start creating amazing videos with AI
+                Sign in to start creating listing videos, neighborhood guides, and market updates.
               </p>
               <div className="space-y-4">
                 <Link 
@@ -68,27 +76,56 @@ export default function Home() {
   }
 
   return (
-    <main className="min-h-screen bg-slate-50">
-      {/* Navigation Header */}
-      <header className="bg-white border-b border-slate-200">
-        <div className="container mx-auto px-4 py-4">
-          <div className="flex items-center justify-between">
-            <h1 className="text-2xl font-bold text-slate-900">TubeAI Video Creator</h1>
-            <div className="flex items-center space-x-4">
-              <span className="text-slate-600">Welcome, {user.email}</span>
-              <button
-                onClick={() => signOut()}
-                className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-lg font-medium transition-colors"
+    <main className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-emerald-50">
+      <div className="container mx-auto px-4 py-10">
+        {/* Hero Section */}
+        <section className="max-w-6xl mx-auto mb-10 grid grid-cols-1 md:grid-cols-2 gap-8 items-center">
+          <div>
+            <p className="text-sm font-medium text-blue-700 mb-2">
+              Welcome back, {user.email}
+            </p>
+            <h1 className="text-4xl md:text-5xl font-extrabold text-slate-900 mb-4 leading-tight">
+              Create property listing videos in minutes.
+            </h1>
+            <p className="text-slate-600 mb-6 text-base md:text-lg">
+              Use AI to turn your property details into professional scripts, voiceovers,
+              and image sequences—ready to share on portals like Property24 and social media.
+            </p>
+            <div className="flex flex-wrap gap-3">
+              <Link
+                href="/script?videoType=listing"
+                className="inline-flex items-center justify-center px-6 py-3 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-semibold transition-colors shadow-md"
               >
-                Sign Out
-              </button>
+                + New Listing Video
+              </Link>
+              <Link
+                href="/script?videoType=neighborhood_guide"
+                className="inline-flex items-center justify-center px-4 py-3 rounded-lg bg-white/80 hover:bg-white text-slate-800 font-medium border border-slate-200 transition-colors"
+              >
+                Neighborhood Guide
+              </Link>
+              <Link
+                href="/script?videoType=market_update"
+                className="inline-flex items-center justify-center px-4 py-3 rounded-lg bg-white/80 hover:bg-white text-slate-800 font-medium border border-slate-200 transition-colors"
+              >
+                Market Update
+              </Link>
             </div>
           </div>
-        </div>
-      </header>
+          <div className="bg-white/80 border border-slate-200 rounded-2xl p-6 shadow-md">
+            <h2 className="text-lg font-semibold text-slate-900 mb-3">
+              How it works
+            </h2>
+            <ol className="space-y-2 text-sm text-slate-700">
+              <li>1. Enter your property details.</li>
+              <li>2. Generate and edit a professional script.</li>
+              <li>3. Create voiceover and visuals (or upload photos).</li>
+              <li>4. Compile a ready-to-share video.</li>
+            </ol>
+          </div>
+        </section>
 
-      <div className="container mx-auto px-4 py-12">
-        {/* Recent Projects / Continue where you left off */}
+        {/* Projects Section */}
         <RecentProjects />
       </div>
     </main>
@@ -96,6 +133,7 @@ export default function Home() {
 }
 
 type SortOption = 'recent' | 'title' | 'oldest';
+type VideoTypeFilter = 'all' | 'listing' | 'neighborhood_guide' | 'market_update';
 
 function RecentProjects() {
   const { user } = useAuth();
@@ -104,6 +142,7 @@ function RecentProjects() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sortBy, setSortBy] = useState<SortOption>('recent');
+  const [videoTypeFilter, setVideoTypeFilter] = useState<VideoTypeFilter>('all');
   const [deletingIds, setDeletingIds] = useState<Set<string>>(new Set());
   const [pendingDeletes, setPendingDeletes] = useState<Map<string, NodeJS.Timeout>>(new Map());
 
@@ -243,13 +282,53 @@ function RecentProjects() {
     }
   };
 
-  const sortedProjects = sortProjects(projects, sortBy);
+  // Filter projects by video type
+  const filteredProjects = videoTypeFilter === 'all' 
+    ? projects 
+    : projects.filter(p => p.video_type === videoTypeFilter);
+  
+  const sortedProjects = sortProjects(filteredProjects, sortBy);
+  
+  // Calculate stats
+  const stats = {
+    listings: projects.filter(p => p.video_type === 'listing').length,
+    neighborhoodGuides: projects.filter(p => p.video_type === 'neighborhood_guide').length,
+    marketUpdates: projects.filter(p => p.video_type === 'market_update').length,
+  };
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-8">
-      <div className="flex items-center justify-between mb-6">
-        <h3 className="text-2xl font-semibold text-slate-900">Your Projects</h3>
+      <div className="mb-6">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-2xl font-semibold text-slate-900">Your Projects</h3>
+          <Link href="/script" className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium transition-colors">+ New Project</Link>
+        </div>
+        
+        {/* Stats */}
+        <div className="flex flex-wrap gap-4 mb-4 text-sm">
+          <div className="bg-blue-50 text-blue-700 px-3 py-1 rounded-full">
+            {stats.listings} Listing Videos
+          </div>
+          <div className="bg-green-50 text-green-700 px-3 py-1 rounded-full">
+            {stats.neighborhoodGuides} Neighborhood Guides
+          </div>
+          <div className="bg-purple-50 text-purple-700 px-3 py-1 rounded-full">
+            {stats.marketUpdates} Market Updates
+          </div>
+        </div>
+        
+        {/* Filters */}
         <div className="flex items-center space-x-4">
+          <select
+            value={videoTypeFilter}
+            onChange={(e) => setVideoTypeFilter(e.target.value as VideoTypeFilter)}
+            className="bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          >
+            <option value="all">All Video Types</option>
+            <option value="listing">Property Listings</option>
+            <option value="neighborhood_guide">Neighborhood Guides</option>
+            <option value="market_update">Market Updates</option>
+          </select>
           <select
             value={sortBy}
             onChange={(e) => setSortBy(e.target.value as SortOption)}
@@ -259,7 +338,6 @@ function RecentProjects() {
             <option value="title">Title A-Z</option>
             <option value="oldest">Oldest First</option>
           </select>
-          <Link href="/script" className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium transition-colors">+ New Project</Link>
         </div>
       </div>
 
@@ -314,7 +392,21 @@ function RecentProjects() {
                 <div className="flex items-start justify-between mb-4">
                   <div className="flex-1">
                     <h4 className="text-lg font-semibold text-slate-900 mb-1">{project.title || 'Untitled Project'}</h4>
-                    {project.topic && <p className="text-sm text-slate-600 mb-2">Topic: {project.topic}</p>}
+                    {project.property_address && (
+                      <p className="text-sm text-slate-700 font-medium mb-1">{project.property_address}</p>
+                    )}
+                    {project.property_type && (
+                      <p className="text-xs text-slate-500 mb-1 capitalize">{project.property_type.replace('_', ' ')}</p>
+                    )}
+                    {(project.bedrooms || project.bathrooms || project.property_price) && (
+                      <p className="text-xs text-slate-600 mb-2">
+                        {project.bedrooms && project.bathrooms && `${project.bedrooms}BR/${project.bathrooms}BA`}
+                        {project.property_price && ` • $${project.property_price.toLocaleString()}`}
+                      </p>
+                    )}
+                    {!project.property_address && project.topic && (
+                      <p className="text-sm text-slate-600 mb-2">Topic: {project.topic}</p>
+                    )}
                   </div>
                   <div className="flex items-center space-x-2">
                     <span className={`px-3 py-1 rounded-full text-xs font-medium border ${stepBadge.color}`}>{stepBadge.text}</span>
