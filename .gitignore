@@ -28,3 +28,10 @@ apps/web/node_modules/
 apps/api/.env
 apps/web/.env.local
 apps/web/.env
+
+# Database migrations (user-specific, should not be in source control)
+supabase/migrations/
+
+# Cursor plans (IDE-specific, should not be in source control)
+.cursor/
+*.plan.md
