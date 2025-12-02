@@ -51,11 +51,46 @@ type Project = {
   updated_at: string;
 };
 
+type RoomBucketId = 'exterior' | 'living' | 'kitchen' | 'bedrooms' | 'bathrooms' | 'outdoor' | 'other';
+
 type ProjectPhoto = {
   id: string;
   image_data_url: string | null;
   analysed: boolean;
   sort_index?: number | null;
+  scene_type?: string | null;
+  room_group?: string | null;
+  bucketId: RoomBucketId;
+};
+
+const ROOM_BUCKETS: { id: RoomBucketId; label: string }[] = [
+  { id: 'exterior', label: 'Exterior / Front of Property' },
+  { id: 'living', label: 'Living & Dining Areas' },
+  { id: 'kitchen', label: 'Kitchen' },
+  { id: 'bedrooms', label: 'Bedrooms' },
+  { id: 'bathrooms', label: 'Bathrooms' },
+  { id: 'outdoor', label: 'Outdoor & Garden' },
+  { id: 'other', label: 'Other' },
+];
+
+const inferBucketIdFromServer = (scene_type?: string | null, room_group?: string | null): RoomBucketId => {
+  const st = (scene_type || '').toLowerCase();
+  if (st === 'exterior') return 'exterior';
+  if (st === 'kitchen') return 'kitchen';
+  if (st === 'bedroom') return 'bedrooms';
+  if (st === 'bathroom') return 'bathrooms';
+  if (st === 'balcony' || st === 'outdoor' || st === 'view') return 'outdoor';
+  if (st === 'living_room' || st === 'interior' || st === 'dining') return 'living';
+
+  const rg = (room_group || '').toLowerCase();
+  if (rg.startsWith('exterior')) return 'exterior';
+  if (rg.startsWith('kitchen')) return 'kitchen';
+  if (rg.startsWith('bedroom')) return 'bedrooms';
+  if (rg.startsWith('bathroom')) return 'bathrooms';
+  if (rg.startsWith('outdoor')) return 'outdoor';
+  if (rg.startsWith('living')) return 'living';
+
+  return 'other';
 };
 
 export default function ScriptPage() {
@@ -248,16 +283,26 @@ function ScriptPageContent() {
         console.error('Failed to load photos:', resp.status, await resp.text());
         return;
       }
-      const data = await resp.json();
-      console.log('[LOAD_PHOTOS] Received data:', { success: data.success, photoCount: data.photos?.length, photos: data.photos });
+      const data = await resp.json() as { success?: boolean; photos?: any[] };
+      console.log('[LOAD_PHOTOS] Received data:', {
+        success: data.success,
+        photoCount: data.photos?.length,
+        photos: data.photos,
+      });
       if (data && data.success && Array.isArray(data.photos)) {
-        const mapped = data.photos.map((p: any) => ({
-          id: p.id,
-          image_data_url: p.image_data_url ?? null,
-          analysed: !!p.analysed,
-          sort_index: p.sort_index ?? null,
-        }));
-        console.log('[LOAD_PHOTOS] Mapped photos:', mapped.length, mapped);
+        const mapped: ProjectPhoto[] = data.photos.map((p: any) => {
+          const bucketId = inferBucketIdFromServer(p.scene_type, p.room_group);
+          return {
+            id: p.id,
+            image_data_url: p.image_data_url ?? null,
+            analysed: !!p.analysed,
+            sort_index: p.sort_index ?? null,
+            scene_type: p.scene_type ?? null,
+            room_group: p.room_group ?? null,
+            bucketId,
+          };
+        });
+        console.log('[LOAD_PHOTOS] Mapped photos with buckets:', mapped.length, mapped);
         setProjectPhotos(mapped);
       } else {
         console.warn('[LOAD_PHOTOS] Invalid response format:', data);
@@ -632,7 +677,9 @@ function ScriptPageContent() {
     const toIndex = current.findIndex((p) => p.id === targetId);
     if (fromIndex === -1 || toIndex === -1) return;
     const [moved] = current.splice(fromIndex, 1);
-    current.splice(toIndex, 0, moved);
+    const targetBucket = current[toIndex].bucketId;
+    const updatedMoved: ProjectPhoto = { ...moved, bucketId: targetBucket };
+    current.splice(toIndex, 0, updatedMoved);
     setProjectPhotos(current);
 
     try {
@@ -650,6 +697,23 @@ function ScriptPageContent() {
       console.error('Failed to persist photo order', e);
     } finally {
       setDragPhotoId(null);
+    }
+  };
+
+  const handleAutoOrderPhotos = async () => {
+    if (!projectId) return;
+    try {
+      await fetch('/api/project-photos/auto-order', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ projectId }),
+      });
+      await loadProjectPhotos(projectId);
+    } catch (e) {
+      console.error('Failed to auto-order photos', e);
+      setError(e instanceof Error ? e.message : 'Failed to auto-order photos');
     }
   };
 
@@ -974,44 +1038,67 @@ function ScriptPageContent() {
                     </div>
                   )}
                   {projectPhotos.length > 0 && (
-                    <div className="mt-3">
-                      <p className="text-xs text-slate-600 mb-2">
-                        Drag to arrange the order your photos will appear in the video and script.
-                      </p>
-                      <div className="flex flex-wrap gap-3">
-                        {projectPhotos.map((photo) => (
-                          <div
-                            key={photo.id}
-                            className={`w-28 h-20 rounded-md overflow-hidden border ${
-                              dragPhotoId === photo.id ? 'border-blue-500' : 'border-slate-300'
-                            } bg-slate-100 flex items-center justify-center relative cursor-move`}
-                            draggable
-                            onDragStart={() => handlePhotoDragStart(photo.id)}
-                            onDragOver={handlePhotoDragOver}
-                            onDrop={() => handlePhotoDrop(photo.id)}
-                          >
-                            {photo.image_data_url ? (
-                              // eslint-disable-next-line @next/next/no-img-element
-                              <img
-                                src={photo.image_data_url}
-                                alt="Property photo"
-                                className="w-full h-full object-cover"
-                              />
-                            ) : (
-                              <span className="text-xs text-slate-500">No preview</span>
-                            )}
-                            <span
-                              className={`absolute bottom-1 left-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold ${
-                                photo.analysed
-                                  ? 'bg-green-600 text-white'
-                                  : 'bg-yellow-100 text-yellow-800'
-                              }`}
-                            >
-                              {photo.analysed ? 'Analysed' : 'Analysing…'}
-                            </span>
-                          </div>
-                        ))}
+                    <div className="mt-3 space-y-4">
+                      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 mb-1">
+                        <p className="text-xs text-slate-600">
+                          Photos are grouped by room type. Drag to adjust the story order, or let the AI auto-order them
+                          for a professional tour flow.
+                        </p>
+                        <button
+                          type="button"
+                          onClick={handleAutoOrderPhotos}
+                          className="inline-flex items-center justify-center rounded-md border border-blue-500 px-3 py-1.5 text-xs font-semibold text-blue-600 bg-white hover:bg-blue-50 transition-colors"
+                        >
+                          🚀 Auto-order for best flow
+                        </button>
                       </div>
+                      {ROOM_BUCKETS.map((bucket) => {
+                        const bucketPhotos = projectPhotos.filter((p) => p.bucketId === bucket.id);
+                        if (bucketPhotos.length === 0) return null;
+                        return (
+                          <div key={bucket.id} className="border border-slate-200 rounded-lg p-2">
+                            <div className="flex items-center justify-between mb-2">
+                              <h4 className="text-xs font-semibold text-slate-800">
+                                {bucket.label} ({bucketPhotos.length})
+                              </h4>
+                            </div>
+                            <div className="flex flex-wrap gap-3">
+                              {bucketPhotos.map((photo) => (
+                                <div
+                                  key={photo.id}
+                                  className={`w-28 h-20 rounded-md overflow-hidden border ${
+                                    dragPhotoId === photo.id ? 'border-blue-500' : 'border-slate-300'
+                                  } bg-slate-100 flex items-center justify-center relative cursor-move`}
+                                  draggable
+                                  onDragStart={() => handlePhotoDragStart(photo.id)}
+                                  onDragOver={handlePhotoDragOver}
+                                  onDrop={() => handlePhotoDrop(photo.id)}
+                                >
+                                  {photo.image_data_url ? (
+                                    // eslint-disable-next-line @next/next/no-img-element
+                                    <img
+                                      src={photo.image_data_url}
+                                      alt="Property photo"
+                                      className="w-full h-full object-cover"
+                                    />
+                                  ) : (
+                                    <span className="text-xs text-slate-500">No preview</span>
+                                  )}
+                                  <span
+                                    className={`absolute bottom-1 left-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold ${
+                                      photo.analysed
+                                        ? 'bg-green-600 text-white'
+                                        : 'bg-yellow-100 text-yellow-800'
+                                    }`}
+                                  >
+                                    {photo.analysed ? 'Analysed' : 'Analysing…'}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
                   )}
                 </div>
@@ -1035,7 +1122,9 @@ function ScriptPageContent() {
                     loading ||
                     (!propertyAddress && !topic.trim()) ||
                     // If any photos uploaded, require min analysed before enabling
-                    (photoStatus && photoStatus.uploaded > 0 && photoStatus.analysed < photoStatus.minRequired)
+                    (photoStatus !== null &&
+                      photoStatus.uploaded > 0 &&
+                      photoStatus.analysed < photoStatus.minRequired)
                   }
                   className="bg-white text-blue-600 hover:bg-blue-50 disabled:opacity-50 disabled:cursor-not-allowed px-8 py-4 rounded-lg font-bold text-lg transition-all transform hover:scale-105 shadow-lg whitespace-nowrap"
                 >

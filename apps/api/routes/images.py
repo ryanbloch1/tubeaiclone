@@ -1110,7 +1110,7 @@ async def list_project_photos(project_id: str, user_id: str = Depends(verify_tok
 
         photos_res = (
             supabase.table("images")
-            .select("id, image_data, image_url, photo_analysis, sort_index, created_at, source_type")
+            .select("id, image_data, image_url, photo_analysis, sort_index, created_at, source_type, scene_type")
             .eq("project_id", project_id)
             .eq("source_type", "uploaded")
             .order("sort_index", desc=False)
@@ -1120,11 +1120,35 @@ async def list_project_photos(project_id: str, user_id: str = Depends(verify_tok
 
         print(f"[LIST_PROJECT_PHOTOS] Found {len(photos_res.data) if photos_res.data else 0} photos for project {project_id}")
 
+        # Helper to derive a high-level room_group label from scene_type or photo_analysis
+        def _room_group_for_image(img: dict) -> str:
+            scene_type = (img.get("scene_type") or "").lower()
+            if not scene_type:
+                pa = img.get("photo_analysis") or {}
+                if isinstance(pa, dict):
+                    scene_type = (pa.get("scene_type") or "").lower()
+
+            if scene_type in ("exterior",):
+                return "Exterior"
+            if scene_type in ("living_room", "interior", "dining"):
+                return "Living"
+            if scene_type in ("kitchen",):
+                return "Kitchen"
+            if scene_type in ("bedroom",):
+                return "Bedrooms"
+            if scene_type in ("bathroom",):
+                return "Bathrooms"
+            if scene_type in ("balcony", "outdoor", "view"):
+                return "Outdoor"
+            return "Other"
+
         photos = []
         if photos_res.data:
             for img in photos_res.data:
                 image_data_url = img.get("image_data") or img.get("image_url")
                 analysed = bool(img.get("photo_analysis"))
+                scene_type = img.get("scene_type")
+                room_group = _room_group_for_image(img)
                 photos.append(
                     {
                         "id": img["id"],
@@ -1132,9 +1156,15 @@ async def list_project_photos(project_id: str, user_id: str = Depends(verify_tok
                         "analysed": analysed,
                         "created_at": img.get("created_at"),
                         "sort_index": img.get("sort_index"),
+                        "scene_type": scene_type,
+                        "room_group": room_group,
                     }
                 )
-                print(f"[LIST_PROJECT_PHOTOS] Photo {img['id']}: has_data={bool(image_data_url)}, analysed={analysed}")
+                print(
+                    f"[LIST_PROJECT_PHOTOS] Photo {img['id']}: "
+                    f"has_data={bool(image_data_url)}, analysed={analysed}, "
+                    f"scene_type={scene_type}, room_group={room_group}"
+                )
 
         return {"success": True, "photos": photos}
     except HTTPException:
@@ -1177,4 +1207,156 @@ async def reorder_project_photos(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to reorder project photos: {e}")
+
+
+@router.post("/project-photos/{project_id}/auto-order")
+async def auto_order_project_photos(
+    project_id: str,
+    user_id: str = Depends(verify_token),
+):
+    """
+    Automatically order project-level photos into a sensible real-estate tour flow.
+
+    The grouping order is:
+      Exterior → Living → Kitchen → Dining → Bedrooms → Bathrooms → Outdoor → Other
+
+    This updates `sort_index` for all uploaded project photos and returns the
+    updated photo list (same shape as list_project_photos).
+    """
+    try:
+        supabase = get_supabase()
+
+        # Verify project ownership
+        project_result = (
+            supabase.table("projects")
+            .select("id")
+            .eq("id", project_id)
+            .eq("user_id", user_id)
+            .execute()
+        )
+        if not project_result.data:
+            raise HTTPException(status_code=403, detail="Project not found or access denied")
+
+        # Fetch all uploaded project-level photos (in their current order)
+        photos_res = (
+            supabase.table("images")
+            .select("id, image_data, image_url, photo_analysis, sort_index, created_at, source_type, scene_type")
+            .eq("project_id", project_id)
+            .eq("source_type", "uploaded")
+            .order("sort_index", desc=False)
+            .order("created_at", desc=False)
+            .execute()
+        )
+
+        images = photos_res.data or []
+        print(f"[AUTO_ORDER_PROJECT_PHOTOS] Found {len(images)} photos for project {project_id}")
+
+        # Helper: derive room_group id used for ordering buckets
+        def _room_group_id(img: dict) -> str:
+            scene_type = (img.get("scene_type") or "").lower()
+            if not scene_type:
+                pa = img.get("photo_analysis") or {}
+                if isinstance(pa, dict):
+                    scene_type = (pa.get("scene_type") or "").lower()
+
+            if scene_type in ("exterior",):
+                return "exterior"
+            if scene_type in ("living_room", "interior", "dining"):
+                return "living"
+            if scene_type in ("kitchen",):
+                return "kitchen"
+            if scene_type in ("bedroom",):
+                return "bedrooms"
+            if scene_type in ("bathroom",):
+                return "bathrooms"
+            if scene_type in ("balcony", "outdoor", "view"):
+                return "outdoor"
+            return "other"
+
+        # Preserve relative order within each bucket
+        buckets: dict[str, list[dict]] = {
+            "exterior": [],
+            "living": [],
+            "kitchen": [],
+            "dining": [],  # currently mapped via "living" scene_type
+            "bedrooms": [],
+            "bathrooms": [],
+            "outdoor": [],
+            "other": [],
+        }
+        for img in images:
+            bucket_id = _room_group_id(img)
+            if bucket_id not in buckets:
+                bucket_id = "other"
+            buckets[bucket_id].append(img)
+
+        ordered_ids: list[str] = []
+        bucket_order = ["exterior", "living", "kitchen", "dining", "bedrooms", "bathrooms", "outdoor", "other"]
+        for bucket_id in bucket_order:
+            for img in buckets[bucket_id]:
+                ordered_ids.append(img["id"])
+
+        # Apply new sort_index sequence
+        for idx, image_id in enumerate(ordered_ids):
+            supabase.table("images").update({"sort_index": idx + 1}).eq("id", image_id).execute()
+
+        # Reload via the list_project_photos shape to keep response consistent
+        refreshed_res = (
+            supabase.table("images")
+            .select("id, image_data, image_url, photo_analysis, sort_index, created_at, source_type, scene_type")
+            .eq("project_id", project_id)
+            .eq("source_type", "uploaded")
+            .order("sort_index", desc=False)
+            .order("created_at", desc=False)
+            .execute()
+        )
+
+        def _room_group_for_image(img: dict) -> str:
+            scene_type = (img.get("scene_type") or "").lower()
+            if not scene_type:
+                pa = img.get("photo_analysis") or {}
+                if isinstance(pa, dict):
+                    scene_type = (pa.get("scene_type") or "").lower()
+
+            if scene_type in ("exterior",):
+                return "Exterior"
+            if scene_type in ("living_room", "interior", "dining"):
+                return "Living"
+            if scene_type in ("kitchen",):
+                return "Kitchen"
+            if scene_type in ("bedroom",):
+                return "Bedrooms"
+            if scene_type in ("bathroom",):
+                return "Bathrooms"
+            if scene_type in ("balcony", "outdoor", "view"):
+                return "Outdoor"
+            return "Other"
+
+        refreshed_photos = []
+        for img in refreshed_res.data or []:
+            image_data_url = img.get("image_data") or img.get("image_url")
+            analysed = bool(img.get("photo_analysis"))
+            scene_type = img.get("scene_type")
+            room_group = _room_group_for_image(img)
+            refreshed_photos.append(
+                {
+                    "id": img["id"],
+                    "image_data_url": image_data_url,
+                    "analysed": analysed,
+                    "created_at": img.get("created_at"),
+                    "sort_index": img.get("sort_index"),
+                    "scene_type": scene_type,
+                    "room_group": room_group,
+                }
+            )
+
+        return {"success": True, "photos": refreshed_photos}
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[AUTO_ORDER_PROJECT_PHOTOS] Error: {type(e).__name__}: {e}")
+        import traceback
+
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to auto-order project photos: {e}") from e
 

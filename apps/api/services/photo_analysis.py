@@ -43,13 +43,29 @@ def _load_model() -> tuple[BlipProcessor, BlipForConditionalGeneration]:
 
 
 SCENE_KEYWORDS: Dict[str, List[str]] = {
+    # Canonical scene types we want to infer for room-based flows
     "kitchen": ["kitchen", "stove", "oven", "cooktop", "countertop"],
-    "living_room": ["living room", "lounge", "sofa", "couch", "tv", "fireplace"],
+    "living_room": ["living room", "lounge", "family room", "sofa", "couch", "fireplace"],
+    "dining": ["dining room", "dining area", "dining table"],
     "bedroom": ["bedroom", "bed", "headboard"],
     "bathroom": ["bathroom", "shower", "bathtub", "toilet", "sink", "vanity"],
     "balcony": ["balcony", "patio", "terrace", "veranda"],
-    "view": ["view", "mountain", "sea", "ocean", "harbour", "harbor", "city skyline"],
-    "exterior": ["building", "house", "street", "garden", "yard", "driveway", "garage"],
+    "outdoor": [
+        "garden",
+        "yard",
+        "pool",
+        "swimming pool",
+        "braai",
+        "braai area",
+        "mountain",
+        "sea",
+        "ocean",
+        "harbour",
+        "harbor",
+        "city skyline",
+        "view",
+    ],
+    "exterior": ["building", "house", "apartment block", "street", "driveway", "garage", "facade", "front door"],
 }
 
 
@@ -62,10 +78,17 @@ def _infer_scene_type(caption: str) -> str:
         if any(k in text for k in keywords):
             return scene
 
-    # Fallback guesses
-    if "inside" in text or "interior" in text:
-        return "interior"
-    return "exterior"
+    # Fallback guesses – keep within our canonical set
+    if "inside" in text or "interior" in text or "room" in text:
+        # Generic interior shot – treat as living space by default
+        return "living_room"
+
+    # If we mention garden/yard but missed earlier, treat as outdoor
+    if "garden" in text or "yard" in text or "outdoor" in text:
+        return "outdoor"
+
+    # Last resort
+    return "other"
 
 
 def _extract_features(caption: str) -> List[str]:
