@@ -370,7 +370,7 @@ Return only the rewritten text, without any additional commentary or labels."""
                     allowed_features.append(f"{square_feet} square metres")
                 allowed_features_str = ", ".join(allowed_features) if allowed_features else "none specified"
                 
-                prompt = f"""You are a South African real-estate video scriptwriter. Generate a COMPLETE property listing video script with ALL {len(photos)} scenes in one response.
+                prompt = f"""You are a South African real-estate video scriptwriter crafting a **professional listing voiceover**. Generate a COMPLETE property listing video script with ALL {len(photos)} scenes in one response.
 
 **PROPERTY INFORMATION:**
 Address: {property_intro}
@@ -383,7 +383,7 @@ Address: {property_intro}
 {photos_block}
 
 **YOUR TASK:**
-Generate ALL {len(photos)} scenes NOW. Write one scene per photo, in the exact order listed above. Each scene must describe the PROPERTY STRUCTURE and PERMANENT FEATURES visible in that photo.
+Generate ALL {len(photos)} scenes NOW. Write one scene per photo, in the exact order listed above. Each scene must describe the PROPERTY STRUCTURE and PERMANENT FEATURES visible in that photo, in a confident, agent-style tone.
 
 **OUTPUT FORMAT - Generate ALL scenes immediately (NO Visuals line, NO notes at the end):**
 
@@ -398,11 +398,22 @@ Scene 3 ({get_time_range(3, len(photos))}): [Title based on Photo 3's scene_type
 
 [Continue for ALL {len(photos)} scenes - do not stop until you have written Scene {len(photos)}]
 
-**CRITICAL RULES:**
+**CRITICAL RULES (STYLE + CONTENT):**
 1. Generate ALL {len(photos)} scenes in ONE response. Do NOT stop after Scene 1.
 2. Do NOT ask questions, wait for confirmation, or say "let me know when to proceed".
 3. Use property address "{property_intro}" in Scene 1 only (e.g., "Welcome to {property_intro}").
-4. **FORBIDDEN - DO NOT INCLUDE OR MENTION:**
+4. **TONE & STYLE – MUST DO:**
+   - Use confident, professional South African real-estate language.
+   - Write in a **direct, descriptive voice** that sounds like an experienced agent speaking to buyers.
+   - Prefer neutral/second person phrasing such as: "This home offers...", "The living area features...", "You step into...".
+   - Vary sentence openings across scenes. Avoid starting every sentence with the same phrase.
+   - Make each scene feel purposeful: highlight a distinct angle or benefit of that room, not just \"more of the same\".
+5. **TONE & STYLE – DO NOT DO (BANNED PHRASES):**
+   - Do NOT use first-person plural narration such as: "we", "us", "our", "let's", "as we", "as we move", "as we step", "we're struck by", "we notice", "we can see".
+   - Do NOT hedge with weak verbs like: "appears to be", "seems to be", "suggests a sense of", "possibly", "might", "a sense of", "we're treated to".
+   - Do NOT repeat vague filler adjectives like: "well-proportioned", "nice", "lovely" without attaching them to a specific feature.
+   - Every sentence must make a concrete point about the property, its layout, or its permanent features.
+6. **FORBIDDEN - DO NOT INCLUDE OR MENTION:**
    - "Visuals:" line (photos are already provided, no need to describe them)
    - Any notes, meta-commentary, or explanations at the end (e.g., "Note: I've written...")
    - **Furniture** (couches, sofas, chairs, tables, beds, mattresses, desks, etc.)
@@ -412,16 +423,16 @@ Scene 3 ({get_time_range(3, len(photos))}): [Title based on Photo 3's scene_type
    - **Temporary items** (personal belongings, clothing, books, plants, etc.)
    - **Features NOT in the property details** (e.g., if balcony is not listed, DO NOT mention it)
    - **ANYTHING that can be moved or removed** - only describe permanent, built-in features
-5. **ONLY MENTION:**
+7. **ONLY MENTION:**
    - Property structure (rooms, layout, size, ceiling height, windows, doors)
    - Permanent fixtures (built-in cabinets, countertops, sinks, bathtubs, showers, lighting fixtures)
    - Architectural features (exposed beams, archways, built-in storage)
    - Finishes (flooring type, wall finishes, tile work)
    - Features from property details IF they appear in the photo (e.g., if "balcony" is in property features AND visible in photo)
-6. Each scene MUST reference specific details from that photo's caption about STRUCTURE/FINISHES only.
-7. Do NOT invent rooms, features, or amenities not in the photo captions OR property details.
-8. Use professional South African real-estate language (Rands, m², suburbs, estates, complexes).
-9. **END CLEANLY**: After Scene {len(photos)}, stop immediately. Do NOT add any notes, explanations, or meta-commentary.
+8. Each scene MUST reference specific details from that photo's caption about STRUCTURE/FINISHES only.
+9. Do NOT invent rooms, features, or amenities not in the photo captions OR property details.
+10. Use professional South African real-estate language (Rands, m², suburbs, estates, complexes).
+11. **END CLEANLY**: After Scene {len(photos)}, stop immediately. Do NOT add any notes, explanations, or meta-commentary.
 
 **EXAMPLE OF WHAT TO DESCRIBE:**
 - "This spacious living room features high ceilings, large windows that flood the space with natural light, and elegant tile flooring."

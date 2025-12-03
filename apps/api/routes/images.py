@@ -45,6 +45,10 @@ class ProjectPhotosReorderRequest(BaseModel):
     image_ids: list[str]
 
 
+class ImageIdsRequest(BaseModel):
+    image_ids: list[str]
+
+
 def _parse_scenes_from_script(script_text: str) -> List[dict]:
     """Parse script into scenes and extract visual descriptions."""
     scenes = []
@@ -1108,13 +1112,16 @@ async def list_project_photos(project_id: str, user_id: str = Depends(verify_tok
         if not project_result.data:
             raise HTTPException(status_code=403, detail="Project not found or access denied")
 
+        # Exclude image_data from list query to prevent timeout - it's too large for bulk queries
+        # Image data will be fetched separately via batch endpoint when needed for display
         photos_res = (
             supabase.table("images")
-            .select("id, image_data, image_url, photo_analysis, sort_index, created_at, source_type, scene_type")
+            .select("id, image_url, photo_analysis, sort_index, created_at, source_type, scene_type")
             .eq("project_id", project_id)
             .eq("source_type", "uploaded")
             .order("sort_index", desc=False)
             .order("created_at", desc=False)
+            .limit(100)  # Can handle more photos without image_data
             .execute()
         )
 
@@ -1145,14 +1152,15 @@ async def list_project_photos(project_id: str, user_id: str = Depends(verify_tok
         photos = []
         if photos_res.data:
             for img in photos_res.data:
-                image_data_url = img.get("image_data") or img.get("image_url")
+                # image_data is excluded to prevent timeout - will be fetched separately if needed
+                image_data_url = img.get("image_url")  # Only use image_url if available
                 analysed = bool(img.get("photo_analysis"))
                 scene_type = img.get("scene_type")
                 room_group = _room_group_for_image(img)
                 photos.append(
                     {
                         "id": img["id"],
-                        "image_data_url": image_data_url,
+                        "image_data_url": image_data_url,  # Will be None - frontend can fetch via separate endpoint
                         "analysed": analysed,
                         "created_at": img.get("created_at"),
                         "sort_index": img.get("sort_index"),
@@ -1162,7 +1170,7 @@ async def list_project_photos(project_id: str, user_id: str = Depends(verify_tok
                 )
                 print(
                     f"[LIST_PROJECT_PHOTOS] Photo {img['id']}: "
-                    f"has_data={bool(image_data_url)}, analysed={analysed}, "
+                    f"has_url={bool(image_data_url)}, analysed={analysed}, "
                     f"scene_type={scene_type}, room_group={room_group}"
                 )
 
@@ -1174,6 +1182,108 @@ async def list_project_photos(project_id: str, user_id: str = Depends(verify_tok
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Failed to fetch project photos: {e}")
+
+
+@router.post("/project-photos/{project_id}/images")
+async def get_project_photo_images_batch(
+    project_id: str,
+    request: ImageIdsRequest,
+    user_id: str = Depends(verify_token),
+):
+    """
+    Get image_data for multiple project photos in a batch.
+    Used for lazy-loading thumbnails to avoid timeout in list endpoint.
+    Accepts a list of image_ids in the request body.
+    """
+    try:
+
+        supabase = get_supabase()
+
+        # Verify project ownership
+        project_result = (
+            supabase.table("projects")
+            .select("id")
+            .eq("id", project_id)
+            .eq("user_id", user_id)
+            .execute()
+        )
+        if not project_result.data:
+            raise HTTPException(status_code=403, detail="Project not found or access denied")
+
+        # Get images in batch (limit to 20 at a time to prevent timeout)
+        image_ids = request.image_ids[:20]  # Limit batch size
+        image_res = (
+            supabase.table("images")
+            .select("id, image_data, image_url")
+            .eq("project_id", project_id)
+            .eq("source_type", "uploaded")
+            .in_("id", image_ids)
+            .execute()
+        )
+
+        # Build a map of image_id -> image_data_url
+        image_map = {}
+        if image_res.data:
+            for img in image_res.data:
+                image_map[img["id"]] = img.get("image_data") or img.get("image_url")
+
+        return {
+            "success": True,
+            "images": image_map,  # {image_id: image_data_url, ...}
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[GET_PROJECT_PHOTO_IMAGES_BATCH] Error: {type(e).__name__}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch photo images: {e}")
+
+
+@router.get("/project-photos/{project_id}/image/{image_id}")
+async def get_project_photo_image(project_id: str, image_id: str, user_id: str = Depends(verify_token)):
+    """
+    Get the full image_data for a specific project photo.
+    Used for lazy-loading thumbnails to avoid timeout in list endpoint.
+    """
+    try:
+        supabase = get_supabase()
+
+        # Verify project ownership
+        project_result = (
+            supabase.table("projects")
+            .select("id")
+            .eq("id", project_id)
+            .eq("user_id", user_id)
+            .execute()
+        )
+        if not project_result.data:
+            raise HTTPException(status_code=403, detail="Project not found or access denied")
+
+        # Get the specific image
+        image_res = (
+            supabase.table("images")
+            .select("id, image_data, image_url")
+            .eq("id", image_id)
+            .eq("project_id", project_id)
+            .eq("source_type", "uploaded")
+            .single()
+            .execute()
+        )
+
+        if not image_res.data:
+            raise HTTPException(status_code=404, detail="Image not found")
+
+        image_data_url = image_res.data.get("image_data") or image_res.data.get("image_url")
+
+        return {
+            "success": True,
+            "image_id": image_id,
+            "image_data_url": image_data_url,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[GET_PROJECT_PHOTO_IMAGE] Error: {type(e).__name__}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch photo image: {e}")
 
 
 @router.post("/project-photos/reorder")

@@ -17,7 +17,8 @@ export default function Navbar() {
   };
 
   const navItems = [
-    { href: '/', label: 'Home', icon: '🏠' },
+    { href: '/', label: 'Home' },
+    { href: '/projects', label: 'Projects' },
   ];
 
   return (
@@ -47,7 +48,6 @@ export default function Navbar() {
                       : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
                   }`}
                 >
-                  <span>{item.icon}</span>
                   <span>{item.label}</span>
                 </Link>
               ))}
@@ -100,7 +100,6 @@ export default function Navbar() {
                     : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
                 }`}
               >
-                <span>{item.icon}</span>
                 <span>{item.label}</span>
               </Link>
             ))}

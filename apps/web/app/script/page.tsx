@@ -146,8 +146,10 @@ function ScriptPageContent() {
   const [photoStatus, setPhotoStatus] = useState<{ uploaded: number; analysed: number; minRequired: number } | null>(null);
   const [savingProject, setSavingProject] = useState(false);
   const [uploadingPhotos, setUploadingPhotos] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<{ current: number; total: number } | null>(null);
   const [projectPhotos, setProjectPhotos] = useState<ProjectPhoto[]>([]);
   const [dragPhotoId, setDragPhotoId] = useState<string | null>(null);
+  const [loadingImageIds, setLoadingImageIds] = useState<Set<string>>(new Set());
 
   // Load projects
   const loadProjects = useCallback(async () => {
@@ -205,7 +207,7 @@ function ScriptPageContent() {
         setVideoLength(project.video_length || '1:00');
         
         // Populate real estate fields
-        setVideoType(project.video_type || 'listing');
+        setVideoType('listing'); // Always property listing
         setPropertyAddress(project.property_address || '');
         setPropertyType(project.property_type || '');
         setPropertyPrice(project.property_price || '');
@@ -247,7 +249,28 @@ function ScriptPageContent() {
   useEffect(() => {
     if (session && typeof window !== 'undefined') {
       const urlParams = new URLSearchParams(window.location.search);
+      const newFlag = urlParams.get('new');
       const projectIdParam = urlParams.get('projectId');
+
+      // If ?new=1 is present, force a fresh project (ignore any existing projectId in URL)
+      if (newFlag === '1') {
+        // Clear any existing project state so ensureProjectId creates a brand new one
+        setProjectId(null);
+        setSelectedProject(null);
+        setEditableScript('');
+        setResult(null);
+        setProjectPhotos([]);
+        setPhotoStatus(null);
+
+        // Also clean up the URL to remove the new=1 flag (optional, nicer UX)
+        const cleaned = new URL(window.location.href);
+        cleaned.searchParams.delete('new');
+        cleaned.searchParams.delete('projectId');
+        window.history.replaceState({}, '', cleaned.toString());
+        return;
+      }
+
+      // Normal case: load an existing project if projectId is provided
       if (projectIdParam && projectIdParam !== projectId) {
         setProjectId(projectIdParam);
         loadProject(projectIdParam);
@@ -271,6 +294,71 @@ function ScriptPageContent() {
       }
     } catch (e) {
       console.error('Failed to load photo status', e);
+    }
+  }, []);
+
+  // Lazy load image data for photos
+  const loadPhotoImageData = useCallback(async (pid: string, imageIds: string[]) => {
+    if (imageIds.length === 0) return;
+    
+    // Mark photos as loading
+    setLoadingImageIds(prev => {
+      const next = new Set(prev);
+      imageIds.forEach(id => next.add(id));
+      return next;
+    });
+    
+    try {
+      // Fetch in batches of 20 to avoid timeout
+      const batchSize = 20;
+      for (let i = 0; i < imageIds.length; i += batchSize) {
+        const batch = imageIds.slice(i, i + batchSize);
+        
+        const resp = await fetch('/api/project-photos/images', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ projectId: pid, imageIds: batch }),
+          cache: 'no-store',
+          credentials: 'include',
+        });
+        
+        if (resp.ok) {
+          const data = await resp.json() as { success?: boolean; images?: Record<string, string> };
+          if (data.success && data.images) {
+            // Update photos with image data
+            setProjectPhotos(prev => prev.map(photo => {
+              if (data.images![photo.id]) {
+                return { ...photo, image_data_url: data.images![photo.id] };
+              }
+              return photo;
+            }));
+            
+            // Remove loaded photos from loading set
+            setLoadingImageIds(prev => {
+              const next = new Set(prev);
+              batch.forEach(id => next.delete(id));
+              return next;
+            });
+          }
+        } else {
+          // Remove failed photos from loading set
+          setLoadingImageIds(prev => {
+            const next = new Set(prev);
+            batch.forEach(id => next.delete(id));
+            return next;
+          });
+        }
+      }
+    } catch (e) {
+      console.error('Failed to load photo image data', e);
+      // Remove all failed photos from loading set
+      setLoadingImageIds(prev => {
+        const next = new Set(prev);
+        imageIds.forEach(id => next.delete(id));
+        return next;
+      });
     }
   }, []);
 
@@ -304,13 +392,19 @@ function ScriptPageContent() {
         });
         console.log('[LOAD_PHOTOS] Mapped photos with buckets:', mapped.length, mapped);
         setProjectPhotos(mapped);
+        
+        // Lazy load image data for photos that don't have it
+        const photosNeedingData = mapped.filter(p => !p.image_data_url);
+        if (photosNeedingData.length > 0) {
+          loadPhotoImageData(pid, photosNeedingData.map(p => p.id));
+        }
       } else {
         console.warn('[LOAD_PHOTOS] Invalid response format:', data);
       }
     } catch (e) {
       console.error('Failed to load project photos', e);
     }
-  }, []);
+  }, [loadPhotoImageData]);
 
   // Refresh photo status when projectId changes
   useEffect(() => {
@@ -388,7 +482,7 @@ function ScriptPageContent() {
             videoLength,
             selection,
             extraContext,
-            videoType,
+            videoType: videoType || 'listing', // Always property listing
             propertyAddress,
             propertyType: propertyType || 'other',
             propertyPrice: propertyPrice || undefined,
@@ -437,7 +531,7 @@ function ScriptPageContent() {
           videoLength,
           projectId: currentProjectId,
           // Real estate fields
-          videoType,
+          videoType: videoType || 'listing', // Always property listing
           propertyAddress,
           propertyType: propertyType || 'other',
           propertyPrice: propertyPrice || undefined,
@@ -608,10 +702,17 @@ function ScriptPageContent() {
       return;
     }
     
+    const fileArray = Array.from(files);
+    const totalFiles = fileArray.length;
+    
     setUploadingPhotos(true);
+    setUploadProgress({ current: 0, total: totalFiles });
     setError(null);
     try {
-      for (const file of Array.from(files)) {
+      for (let i = 0; i < fileArray.length; i++) {
+        const file = fileArray[i];
+        setUploadProgress({ current: i, total: totalFiles });
+        
         const reader = new FileReader();
         const loadPromise = new Promise<void>((resolve, reject) => {
           reader.onloadend = async () => {
@@ -639,6 +740,8 @@ function ScriptPageContent() {
                 }
                 throw new Error(errorMsg);
               }
+              // Update progress after successful upload
+              setUploadProgress({ current: i + 1, total: totalFiles });
               resolve();
             } catch (e) {
               reject(e);
@@ -659,6 +762,7 @@ function ScriptPageContent() {
       setError(e instanceof Error ? e.message : 'Failed to upload photos');
     } finally {
       setUploadingPhotos(false);
+      setUploadProgress(null);
     }
   };
 
@@ -731,7 +835,7 @@ function ScriptPageContent() {
         <div className="max-w-5xl mx-auto">
           <div className="text-center mb-8">
             <h1 className="text-4xl font-bold text-slate-900 mb-2">Create Property Listing Video</h1>
-            <p className="text-slate-600">Enter property details and we'll generate a professional script automatically</p>
+            <p className="text-slate-600">Enter property details and we&apos;ll generate a professional script automatically</p>
           </div>
           
           <form onSubmit={onSubmit} className="space-y-6">
@@ -742,24 +846,6 @@ function ScriptPageContent() {
                 <h2 className="text-2xl font-bold text-slate-900">Property Information</h2>
             </div>
 
-              {/* Video Type - Prominent */}
-              <div>
-                <label htmlFor="video-type" className="block text-sm font-semibold text-slate-700 mb-2">
-                  Video Type <span className="text-red-500">*</span>
-                </label>
-                <select
-                  id="video-type"
-                  value={videoType}
-                  onChange={(e) => setVideoType(e.target.value as typeof videoType)}
-                  className="w-full rounded-lg border-2 border-slate-300 px-4 py-3 text-base bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-200 font-medium"
-                  required
-                >
-                  <option value="listing">🏠 Property Listing</option>
-                  <option value="neighborhood_guide">📍 Neighborhood Guide</option>
-                  <option value="market_update">📊 Market Update</option>
-                </select>
-              </div>
-              
               {/* Property Address - Primary Input */}
               <div>
                 <label htmlFor="property-address" className="block text-sm font-semibold text-slate-700 mb-2">
@@ -780,16 +866,16 @@ function ScriptPageContent() {
                   className="w-full rounded-lg border-2 border-slate-300 px-4 py-3 text-base bg-white text-black focus:border-blue-500 focus:ring-2 focus:ring-blue-200 placeholder-slate-400"
                 />
                 <p className="text-xs text-slate-500 mt-1">This will be used as the video title if no custom title is provided</p>
-              </div>
-              
+            </div>
+
               {/* Property Details Grid */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-4 border-t border-slate-200">
                   
-                <div>
+              <div>
                   <label htmlFor="property-type" className="block text-sm font-semibold text-slate-700 mb-2">
                     Property Type
-                  </label>
-                  <select
+                </label>
+                <select
                     id="property-type"
                     value={propertyType}
                     onChange={(e) => setPropertyType(e.target.value)}
@@ -940,8 +1026,8 @@ function ScriptPageContent() {
                   ))}
                 </div>
               </div>
-            </div>
-            
+              </div>
+
             {/* Video Settings - Collapsible */}
             <div className="bg-white border border-slate-200 rounded-xl shadow-sm p-6">
               <button
@@ -986,9 +1072,9 @@ function ScriptPageContent() {
                         <option value="1:00">1:00 (Standard)</option>
                         <option value="2:00">2:00 (Extended)</option>
                         <option value="3:00">3:00 (Long)</option>
-                      </select>
-                    </div>
-                    
+                </select>
+              </div>
+
                     <div />
                   </div>
                 </div>
@@ -997,7 +1083,34 @@ function ScriptPageContent() {
             
             {/* Upload Photos section - images-first flow */}
             {(propertyAddress || topic.trim()) && (
-              <div className="bg-white border border-slate-200 rounded-xl shadow-sm p-6 space-y-4">
+              <div className="bg-white border border-slate-200 rounded-xl shadow-sm p-6 space-y-4 relative">
+                {/* Progress bar overlay when photos are being analyzed */}
+                {photoStatus && photoStatus.uploaded > 0 && photoStatus.uploaded > photoStatus.analysed && (
+                  <div className="absolute inset-0 bg-white/95 backdrop-blur-sm rounded-xl flex flex-col items-center justify-center z-10">
+                    <div className="w-full max-w-md px-6">
+                      <div className="mb-4 text-center">
+                        <h4 className="text-lg font-bold text-slate-900 mb-2">Analyzing Photos</h4>
+                        <p className="text-sm text-slate-600">
+                          {photoStatus.analysed} of {photoStatus.uploaded} photos analyzed
+                        </p>
+                      </div>
+                      <div className="w-full bg-slate-200 rounded-full h-3 mb-2 overflow-hidden">
+                        <div
+                          className="bg-gradient-to-r from-blue-500 to-green-500 h-full rounded-full transition-all duration-500 ease-out"
+                          style={{
+                            width: `${Math.round((photoStatus.analysed / photoStatus.uploaded) * 100)}%`,
+                          }}
+                        />
+                      </div>
+                      <div className="text-center">
+                        <span className="text-xs font-semibold text-slate-700">
+                          {Math.round((photoStatus.analysed / photoStatus.uploaded) * 100)}%
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-500 text-center mt-3">This may take a moment...</p>
+                    </div>
+                  </div>
+                )}
                 <div>
                   <h3 className="text-lg font-semibold text-slate-900">Property Photos</h3>
                   <p className="text-sm text-slate-600">
@@ -1005,7 +1118,33 @@ function ScriptPageContent() {
                   </p>
                 </div>
                 <div className="mt-2 space-y-3">
-                  <label className="block">
+                  <label className="block relative">
+                    {/* Upload progress overlay */}
+                    {uploadingPhotos && uploadProgress && (
+                      <div className="absolute inset-0 bg-white/95 backdrop-blur-sm rounded-xl flex flex-col items-center justify-center z-20">
+                        <div className="w-full max-w-md px-6">
+                          <div className="mb-4 text-center">
+                            <h4 className="text-lg font-bold text-slate-900 mb-2">Uploading Photos</h4>
+                            <p className="text-sm text-slate-600">
+                              {uploadProgress.current} of {uploadProgress.total} photos uploaded
+                            </p>
+                          </div>
+                          <div className="w-full bg-slate-200 rounded-full h-3 mb-2 overflow-hidden">
+                            <div
+                              className="bg-gradient-to-r from-blue-500 to-green-500 h-full rounded-full transition-all duration-300 ease-out"
+                              style={{
+                                width: `${Math.round((uploadProgress.current / uploadProgress.total) * 100)}%`,
+                              }}
+                            />
+                          </div>
+                          <div className="text-center">
+                            <span className="text-xs font-semibold text-slate-700">
+                              {Math.round((uploadProgress.current / uploadProgress.total) * 100)}%
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
                     <div className="flex flex-col items-center justify-center border-2 border-dashed border-slate-300 rounded-xl py-6 px-4 cursor-pointer hover:border-slate-400 transition-colors bg-slate-50">
                       <div className="text-2xl mb-2">📤</div>
                       <div className="text-sm font-medium text-slate-900">
@@ -1037,24 +1176,54 @@ function ScriptPageContent() {
                       )}
                     </div>
                   )}
-                  {projectPhotos.length > 0 && (
+                  {/* Grouped photos / room buckets */}
+                  {photoStatus && photoStatus.uploaded > 0 && (
                     <div className="mt-3 space-y-4">
+                      {/* Determine if we're still waiting for grouped photos to load */}
+                      {(() => {
+                        const isGroupingPhotos =
+                          !uploadingPhotos &&
+                          photoStatus.uploaded > 0 &&
+                          projectPhotos.length === 0;
+                        return isGroupingPhotos ? (
+                          <div className="flex items-center gap-2 text-xs text-slate-600 mb-1">
+                            <span className="animate-spin rounded-full h-4 w-4 border-2 border-slate-300 border-t-blue-600" />
+                            <span>Analyzing and grouping your photos by room type…</span>
+                          </div>
+                        ) : null;
+                      })()}
+
                       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 mb-1">
                         <p className="text-xs text-slate-600">
                           Photos are grouped by room type. Drag to adjust the story order, or let the AI auto-order them
                           for a professional tour flow.
                         </p>
-                        <button
-                          type="button"
-                          onClick={handleAutoOrderPhotos}
-                          className="inline-flex items-center justify-center rounded-md border border-blue-500 px-3 py-1.5 text-xs font-semibold text-blue-600 bg-white hover:bg-blue-50 transition-colors"
-                        >
-                          🚀 Auto-order for best flow
-                        </button>
+                        {projectPhotos.length > 0 && (
+              <button
+                type="button"
+                            onClick={handleAutoOrderPhotos}
+                            className="inline-flex items-center justify-center rounded-md border border-blue-500 px-3 py-1.5 text-xs font-semibold text-blue-600 bg-white hover:bg-blue-50 transition-colors"
+              >
+                            🚀 Auto-order for best flow
+              </button>
+                        )}
                       </div>
+
                       {ROOM_BUCKETS.map((bucket) => {
                         const bucketPhotos = projectPhotos.filter((p) => p.bucketId === bucket.id);
-                        if (bucketPhotos.length === 0) return null;
+                        const isEmpty = bucketPhotos.length === 0;
+
+                        // If we truly have no photos for this bucket and we're not grouping, hide it
+                        const isGroupingPhotos =
+                          !uploadingPhotos &&
+                          photoStatus.uploaded > 0 &&
+                          projectPhotos.length === 0;
+                        if (isEmpty && !isGroupingPhotos) return null;
+
+                        const tiles: (ProjectPhoto | null)[] = isEmpty
+                          ? new Array<ProjectPhoto | null>(3).fill(null)
+                          : bucketPhotos;
+
                         return (
                           <div key={bucket.id} className="border border-slate-200 rounded-lg p-2">
                             <div className="flex items-center justify-between mb-2">
@@ -1063,38 +1232,34 @@ function ScriptPageContent() {
                               </h4>
                             </div>
                             <div className="flex flex-wrap gap-3">
-                              {bucketPhotos.map((photo) => (
-                                <div
-                                  key={photo.id}
-                                  className={`w-28 h-20 rounded-md overflow-hidden border ${
-                                    dragPhotoId === photo.id ? 'border-blue-500' : 'border-slate-300'
-                                  } bg-slate-100 flex items-center justify-center relative cursor-move`}
-                                  draggable
-                                  onDragStart={() => handlePhotoDragStart(photo.id)}
-                                  onDragOver={handlePhotoDragOver}
-                                  onDrop={() => handlePhotoDrop(photo.id)}
-                                >
-                                  {photo.image_data_url ? (
-                                    // eslint-disable-next-line @next/next/no-img-element
-                                    <img
-                                      src={photo.image_data_url}
-                                      alt="Property photo"
-                                      className="w-full h-full object-cover"
-                                    />
-                                  ) : (
-                                    <span className="text-xs text-slate-500">No preview</span>
-                                  )}
-                                  <span
-                                    className={`absolute bottom-1 left-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold ${
-                                      photo.analysed
-                                        ? 'bg-green-600 text-white'
-                                        : 'bg-yellow-100 text-yellow-800'
-                                    }`}
+                              {tiles.map((photo, idx) => {
+                                const key = photo ? photo.id : `${bucket.id}-skeleton-${idx}`;
+                                return (
+                                  <div
+                                    key={key}
+                                    className="w-28 h-20 rounded-md overflow-hidden border border-slate-200 bg-slate-100 flex items-center justify-center relative cursor-move"
                                   >
-                                    {photo.analysed ? 'Analysed' : 'Analysing…'}
-                                  </span>
-                                </div>
-                              ))}
+                                    {photo ? (
+                                      photo.image_data_url ? (
+                                        // eslint-disable-next-line @next/next/no-img-element
+                                        <img
+                                          src={photo.image_data_url}
+                                          alt="Property photo"
+                                          className="w-full h-full object-cover"
+                                        />
+                                      ) : loadingImageIds.has(photo.id) ? (
+                                        <div className="flex items-center justify-center w-full h-full">
+                                          <div className="animate-spin rounded-full h-6 w-6 border-2 border-slate-400 border-t-blue-600" />
+                                        </div>
+                                      ) : (
+                                        <span className="text-xs text-slate-500">No preview</span>
+                                      )
+                                    ) : (
+                                      <div className="w-full h-full bg-slate-200 animate-pulse" />
+                                    )}
+                                  </div>
+                                );
+                              })}
                             </div>
                           </div>
                         );
@@ -1118,14 +1283,22 @@ function ScriptPageContent() {
                 </div>
                 <button
                   type="submit"
-                  disabled={
-                    loading ||
-                    (!propertyAddress && !topic.trim()) ||
-                    // If any photos uploaded, require min analysed before enabling
-                    (photoStatus !== null &&
+                  disabled={(() => {
+                    const isGroupingPhotos =
+                      !uploadingPhotos &&
+                      photoStatus !== null &&
                       photoStatus.uploaded > 0 &&
-                      photoStatus.analysed < photoStatus.minRequired)
-                  }
+                      projectPhotos.length === 0;
+                    return (
+                      loading ||
+                      uploadingPhotos ||
+                      (!propertyAddress && !topic.trim()) ||
+                      isGroupingPhotos ||
+                      (photoStatus !== null &&
+                        photoStatus.uploaded > 0 &&
+                        photoStatus.analysed < photoStatus.minRequired)
+                    );
+                  })()}
                   className="bg-white text-blue-600 hover:bg-blue-50 disabled:opacity-50 disabled:cursor-not-allowed px-8 py-4 rounded-lg font-bold text-lg transition-all transform hover:scale-105 shadow-lg whitespace-nowrap"
                 >
                   {loading ? (

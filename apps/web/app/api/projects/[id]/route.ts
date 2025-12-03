@@ -61,7 +61,7 @@ export async function DELETE(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    // Verify user owns the project before deletion
+    // Verify user owns the project before deletion (for user‑friendly 404)
     const { data: project, error: projectError } = await supabase
       .from('projects')
       .select('id, title')
@@ -73,16 +73,106 @@ export async function DELETE(
       return NextResponse.json({ error: 'Project not found' }, { status: 404 });
     }
 
-    // Delete project (CASCADE will handle related data)
+    // 1) Find scripts for this project (to clean up scenes safely)
+    const { data: scripts, error: scriptsSelectError } = await supabase
+      .from('scripts')
+      .select('id')
+      .eq('project_id', id);
+
+    if (scriptsSelectError) {
+      console.error('Delete project - fetch scripts error:', scriptsSelectError);
+      return NextResponse.json(
+        { error: 'Failed to delete project', detail: 'Could not load scripts for project' },
+        { status: 500 },
+      );
+    }
+
+    const scriptIds = (scripts || []).map((s: { id: string }) => s.id);
+
+    // 2) Delete scenes in batches by script_id (in case ON DELETE CASCADE is not set)
+    const SCENE_BATCH_SIZE = 100;
+    for (let i = 0; i < scriptIds.length; i += SCENE_BATCH_SIZE) {
+      const batch = scriptIds.slice(i, i + SCENE_BATCH_SIZE);
+      const { error: scenesDeleteError } = await supabase
+        .from('scenes')
+        .delete()
+        .in('script_id', batch);
+
+      if (scenesDeleteError) {
+        console.error('Delete project - delete scenes error:', scenesDeleteError);
+        return NextResponse.json(
+          { error: 'Failed to delete project', detail: 'Could not delete scenes for project' },
+          { status: 500 },
+        );
+      }
+    }
+
+    // 3) Delete images in ID batches to avoid long-running statements / timeouts
+    const IMAGE_BATCH_SIZE = 500;
+    // Loop until no more images remain for this project
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      const { data: imagesPage, error: imagesSelectError } = await supabase
+        .from('images')
+        .select('id')
+        .eq('project_id', id)
+        .limit(IMAGE_BATCH_SIZE);
+
+      if (imagesSelectError) {
+        console.error('Delete project - fetch images error:', imagesSelectError);
+        return NextResponse.json(
+          { error: 'Failed to delete project', detail: 'Could not load images for project' },
+          { status: 500 },
+        );
+      }
+
+      if (!imagesPage || imagesPage.length === 0) {
+        break;
+      }
+
+      const imageIds = imagesPage.map((img: { id: string }) => img.id);
+
+      const { error: imagesDeleteError } = await supabase
+        .from('images')
+        .delete()
+        .in('id', imageIds);
+
+      if (imagesDeleteError) {
+        console.error('Delete project - delete images error:', imagesDeleteError);
+        return NextResponse.json(
+          { error: 'Failed to delete project', detail: 'Could not delete images for project' },
+          { status: 500 },
+        );
+      }
+    }
+
+    // 4) Delete scripts for this project (scenes already removed above)
+    const { error: scriptsDeleteError } = await supabase
+      .from('scripts')
+      .delete()
+      .eq('project_id', id);
+
+    if (scriptsDeleteError) {
+      console.error('Delete project - delete scripts error:', scriptsDeleteError);
+      return NextResponse.json(
+        { error: 'Failed to delete project', detail: 'Could not delete scripts for project' },
+        { status: 500 },
+      );
+    }
+
+    // 5) Finally delete the project itself
     const { error: deleteError } = await supabase
       .from('projects')
       .delete()
       .eq('id', id)
-      .eq('user_id', user.id); // Double-check ownership
+      .eq('user_id', user.id);
 
     if (deleteError) {
       console.error('Delete project error:', deleteError);
-      return NextResponse.json({ error: 'Failed to delete project' }, { status: 500 });
+      return NextResponse.json({ 
+        error: 'Failed to delete project',
+        detail: deleteError.message 
+      }, { status: 500 });
     }
 
     return NextResponse.json({ 
