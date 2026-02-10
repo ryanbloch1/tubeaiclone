@@ -57,12 +57,10 @@ Create a cinematic, visual prompt that captures the essence of this scene for AI
 
 Keep it under 200 characters and make it highly visual.`;
 
-    console.log(`Generating image prompt for Scene ${scene_number}:`, scene_text.substring(0, 100) + '...');
     
     const result = await model.generateContent(prompt);
     const generatedPrompt = result.response.text().trim();
     
-    console.log(`Generated prompt:`, generatedPrompt);
 
     return NextResponse.json({
       prompt: generatedPrompt,

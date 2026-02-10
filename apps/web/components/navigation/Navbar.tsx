@@ -17,7 +17,7 @@ export default function Navbar() {
   };
 
   const navItems = [
-    { href: '/', label: 'Home', icon: '🏠' },
+    { href: '/', label: 'Home', icon: 'H' },
   ];
 
   return (
@@ -27,10 +27,12 @@ export default function Navbar() {
           {/* Logo and Brand */}
           <div className="flex items-center space-x-8">
             <Link href="/" className="flex items-center space-x-2">
-              <div className="w-8 h-8 bg-gradient-to-br from-blue-600 to-purple-600 rounded-lg flex items-center justify-center">
-                <span className="text-white font-bold text-sm">T</span>
+              <div className="w-8 h-8 bg-gradient-to-br from-blue-600 to-emerald-500 rounded-lg flex items-center justify-center">
+                <span className="text-white font-bold text-sm">RE</span>
               </div>
-              <span className="text-xl font-bold text-slate-900">TubeAI Clone</span>
+              <span className="text-xl font-bold text-slate-900">
+                RealEstate Video Pro
+              </span>
             </Link>
 
             {/* Navigation Links */}
@@ -75,7 +77,7 @@ export default function Navbar() {
                     Sign In
                   </Button>
                 </Link>
-                <Link href="/register">
+                <Link href="/signup">
                   <Button size="sm">
                     Get Started
                   </Button>

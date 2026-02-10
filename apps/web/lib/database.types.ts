@@ -43,6 +43,15 @@ export type Database = {
           video_length: string;
           selection: string | null;
           extra_context: string | null;
+          video_type: string | null;
+          property_type: string | null;
+          property_address: string | null;
+          property_price: number | null;
+          bedrooms: number | null;
+          bathrooms: number | null;
+          square_feet: number | null;
+          mls_number: string | null;
+          property_features: unknown | null;
           created_at: string;
           updated_at: string;
         };
@@ -61,6 +70,15 @@ export type Database = {
           video_length?: string;
           selection?: string | null;
           extra_context?: string | null;
+          video_type?: string | null;
+          property_type?: string | null;
+          property_address?: string | null;
+          property_price?: number | null;
+          bedrooms?: number | null;
+          bathrooms?: number | null;
+          square_feet?: number | null;
+          mls_number?: string | null;
+          property_features?: unknown | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -79,6 +97,15 @@ export type Database = {
           video_length?: string;
           selection?: string | null;
           extra_context?: string | null;
+          video_type?: string | null;
+          property_type?: string | null;
+          property_address?: string | null;
+          property_price?: number | null;
+          bedrooms?: number | null;
+          bathrooms?: number | null;
+          square_feet?: number | null;
+          mls_number?: string | null;
+          property_features?: unknown | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -87,7 +114,6 @@ export type Database = {
         Row: {
           id: string;
           project_id: string;
-          user_id: string;
           raw_script: string;
           edited_script: string;
           sanitized_script: string | null;
@@ -97,7 +123,6 @@ export type Database = {
         Insert: {
           id?: string;
           project_id: string;
-          user_id: string;
           raw_script: string;
           edited_script: string;
           sanitized_script?: string | null;
@@ -107,7 +132,6 @@ export type Database = {
         Update: {
           id?: string;
           project_id?: string;
-          user_id?: string;
           raw_script?: string;
           edited_script?: string;
           sanitized_script?: string | null;

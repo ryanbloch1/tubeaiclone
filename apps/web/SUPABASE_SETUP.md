@@ -99,7 +99,6 @@ apps/web/
 
 ```typescript
 "use client";
-import { getProjects, createProject } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth/user";
 
 export default function ProjectsPage() {
@@ -109,7 +108,8 @@ export default function ProjectsPage() {
     async function loadProjects() {
       const user = await getCurrentUser();
       if (user) {
-        const data = await getProjects();
+        const res = await fetch("/api/projects");
+        const data = await res.json();
         setProjects(data);
       }
     }
@@ -124,7 +124,6 @@ export default function ProjectsPage() {
 
 ```typescript
 import { createClient } from "@/lib/supabase/server";
-import { getProjects } from "@/lib/db";
 
 export default async function ProjectsPage() {
   const supabase = await createClient();
@@ -136,7 +135,8 @@ export default async function ProjectsPage() {
     redirect("/login");
   }
 
-  const projects = await getProjects();
+  const res = await fetch("/api/projects");
+  const projects = await res.json();
 
   return <div>{/* Render projects */}</div>;
 }
@@ -147,7 +147,6 @@ export default async function ProjectsPage() {
 ```typescript
 // app/api/projects/route.ts
 import { createClient } from "@/lib/supabase/server";
-import { getProjects } from "@/lib/db";
 import { NextResponse } from "next/server";
 
 export async function GET() {
@@ -161,7 +160,14 @@ export async function GET() {
   }
 
   try {
-    const projects = await getProjects();
+    const { data: projects, error } = await supabase
+      .from("projects")
+      .select("*")
+      .eq("user_id", user.id)
+      .order("updated_at", { ascending: false });
+    if (error) {
+      throw error;
+    }
     return NextResponse.json(projects);
   } catch (error) {
     return NextResponse.json(

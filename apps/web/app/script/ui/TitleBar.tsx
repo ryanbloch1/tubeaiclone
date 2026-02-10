@@ -29,7 +29,7 @@ export const TitleBar: React.FC<Props> = ({
         <button type="button" className={styles.iconBtn} title="Create New Style" onClick={onOpenStyleModal}>
           ⚙️
         </button>
-        <span>🔍</span>
+        <span>Search</span>
       </div>
       <input
         className="flex-1 bg-white px-2 py-2 outline-none text-black border border-black rounded placeholder-black placeholder-opacity-55"
@@ -38,8 +38,8 @@ export const TitleBar: React.FC<Props> = ({
         onChange={(e) => setTopic(e.target.value)}
       />
       <div className="ml-3 flex items-center gap-3 text-slate-600">
-        <button type="button" title="Style / Options" onClick={onOpenStyleModal} className="hover:text-slate-900 transition-colors">🎬</button>
-        <button type="button" title="Additional Context" onClick={onOpenContextModal} className="hover:text-slate-900 transition-colors">✨</button>
+        <button type="button" title="Style / Options" onClick={onOpenStyleModal} className="hover:text-slate-900 transition-colors">Style</button>
+        <button type="button" title="Additional Context" onClick={onOpenContextModal} className="hover:text-slate-900 transition-colors">Context</button>
         <select 
           value={videoLength} 
           onChange={(e) => onVideoLengthChange(e.target.value)}

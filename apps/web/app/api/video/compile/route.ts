@@ -1,22 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { API_BASE } from '@/lib/config';
 
 export async function POST(req: NextRequest) {
   try {
-    console.log('[VIDEO API] Compile request received');
     const body = await req.json();
     const auth = req.headers.get('authorization') || '';
     
     // Debug logging
-    console.log('[VIDEO API] Auth header present:', !!auth);
-    console.log('[VIDEO API] Auth header length:', auth.length);
-    console.log('[VIDEO API] Project ID:', body.project_id);
     
     if (!auth) {
-      console.log('[VIDEO API] No auth header, returning 401');
       return NextResponse.json({ error: 'No authorization header provided' }, { status: 401 });
     }
     
-    console.log('[VIDEO API] Forwarding request to backend...');
     
     // Video compilation can take a while - set a longer timeout (5 minutes)
     const controller = new AbortController();
@@ -27,7 +22,7 @@ export async function POST(req: NextRequest) {
     
     let resp: Response;
     try {
-      resp = await fetch('http://127.0.0.1:8000/api/video/compile', {
+      resp = await fetch(`${API_BASE}/api/video/compile`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -37,11 +32,12 @@ export async function POST(req: NextRequest) {
         signal: controller.signal,
       });
       clearTimeout(timeoutId);
-    } catch (fetchError: any) {
+    } catch (fetchError: unknown) {
       clearTimeout(timeoutId);
       console.error('[VIDEO API] Backend fetch error:', fetchError);
-      
-      if (fetchError.name === 'AbortError') {
+      const err = fetchError as { name?: string; message?: string; code?: string };
+
+      if (err.name === 'AbortError') {
         return NextResponse.json({ 
           error: 'Video compilation timed out. The video is still being processed - please wait and refresh.',
           timeout: true
@@ -49,7 +45,7 @@ export async function POST(req: NextRequest) {
       }
       
       // Check if backend is unreachable
-      if (fetchError.message?.includes('ECONNREFUSED') || fetchError.code === 'ECONNREFUSED') {
+      if (err.message?.includes('ECONNREFUSED') || err.code === 'ECONNREFUSED') {
         console.error('[VIDEO API] Backend is not reachable on port 8000');
         return NextResponse.json({ 
           error: 'Backend API is not reachable. Please ensure the FastAPI server is running on port 8000.',
@@ -60,27 +56,24 @@ export async function POST(req: NextRequest) {
       throw fetchError;
     }
     
-    console.log('[VIDEO API] Backend response status:', resp.status);
     const text = await resp.text();
-    console.log('[VIDEO API] Backend response length:', text.length);
     
-    let data: any;
+    let data: unknown;
     try { 
       data = JSON.parse(text); 
     } catch { 
-      console.log('[VIDEO API] Failed to parse JSON, returning raw text');
       data = { raw: text }; 
     }
     
-    console.log('[VIDEO API] Returning response to client');
     return NextResponse.json(data, { status: resp.status });
-  } catch (e: any) {
+  } catch (e: unknown) {
     console.error('[VIDEO API] Error:', e);
-    console.error('[VIDEO API] Error stack:', e.stack);
+    if (e instanceof Error) {
+      console.error('[VIDEO API] Error stack:', e.stack);
+    }
     return NextResponse.json({ 
-      error: e?.message || 'Failed to compile video',
+      error: e instanceof Error ? e.message : 'Failed to compile video',
       details: String(e)
     }, { status: 500 });
   }
 }
-

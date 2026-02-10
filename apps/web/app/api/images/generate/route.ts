@@ -1,4 +1,5 @@
 import { NextRequest } from 'next/server';
+import { API_BASE } from '@/lib/config';
 
 export async function POST(req: NextRequest) {
   try {
@@ -6,7 +7,7 @@ export async function POST(req: NextRequest) {
     const auth = req.headers.get('authorization') || '';
     
     // Forward the streaming request to FastAPI
-    const resp = await fetch('http://127.0.0.1:8000/api/images/generate', {
+    const resp = await fetch(`${API_BASE}/api/images/generate`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -30,8 +31,9 @@ export async function POST(req: NextRequest) {
         'X-Accel-Buffering': 'no',
       },
     });
-  } catch (e: any) {
-    return new Response(JSON.stringify({ error: e?.message || 'Failed to generate images' }), {
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : 'Failed to generate images';
+    return new Response(JSON.stringify({ error: message }), {
       status: 500,
       headers: { 'Content-Type': 'application/json' },
     });

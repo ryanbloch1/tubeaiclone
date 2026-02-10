@@ -1,7 +1,9 @@
 import base64
 import io
 import os
+import sys
 import time
+from pathlib import Path
 
 try:
     # Load environment variables from a .env file
@@ -42,19 +44,26 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include routers for new Supabase-integrated endpoints
+# Ensure local package path is on sys.path so absolute module imports work
+_API_ROOT = Path(__file__).resolve().parent
+if str(_API_ROOT) not in sys.path:
+    sys.path.insert(0, str(_API_ROOT))
+
+# Include routers for Supabase-integrated endpoints (fail fast if missing)
 try:
     from routes.script import router as script_router
     from routes.voiceover import router as voiceover_router
     from routes.images import router as images_router
     from routes.video import router as video_router
-    app.include_router(script_router)
-    app.include_router(voiceover_router, prefix="/api/voiceover")
-    app.include_router(images_router, prefix="/api/images")
-    app.include_router(video_router, prefix="/api/video")
-    print("✅ Loaded Supabase-integrated routes")
-except ImportError as e:
-    print(f"⚠️  Supabase routes not available: {e}")
+    from routes.projects import router as projects_router
+except Exception as e:  # Fail fast with context
+    raise RuntimeError(f"Failed to import API routers: {e}") from e
+
+app.include_router(script_router)
+app.include_router(voiceover_router, prefix="/api/voiceover")
+app.include_router(images_router, prefix="/api/images")
+app.include_router(video_router, prefix="/api/video")
+app.include_router(projects_router)
 
 
 class ImageRequest(BaseModel):
@@ -98,7 +107,7 @@ class SDImageRequest(BaseModel):
 
 def get_sd_pipeline(model_id: str):
     """
-    Get or create a cached Stable Diffusion pipeline.
+    Get or create a cached Stable Diffusion pipeline (supports SD 2.1 and SDXL).
     
     Args:
         model_id: The model identifier to load
@@ -110,7 +119,6 @@ def get_sd_pipeline(model_id: str):
     
     if _sd_pipeline is None or _sd_model_id != model_id:
         # Deferred imports to keep API startup light
-        from diffusers import StableDiffusionPipeline
         import torch
         
         # Auto-detect best available device
@@ -125,10 +133,20 @@ def get_sd_pipeline(model_id: str):
             dtype = torch.float32
         
         print(f"Loading SD pipeline: {model_id} on {device}")
-        _sd_pipeline = StableDiffusionPipeline.from_pretrained(model_id, torch_dtype=dtype)
+        
+        # Check if it's an SDXL model
+        is_sdxl = "xl" in model_id.lower() or "sdxl" in model_id.lower()
+        
+        if is_sdxl:
+            from diffusers import StableDiffusionXLPipeline
+            _sd_pipeline = StableDiffusionXLPipeline.from_pretrained(model_id, torch_dtype=dtype)
+        else:
+            from diffusers import StableDiffusionPipeline
+            _sd_pipeline = StableDiffusionPipeline.from_pretrained(model_id, torch_dtype=dtype)
+        
         _sd_pipeline = _sd_pipeline.to(device)
         _sd_model_id = model_id
-        print("SD pipeline loaded successfully")
+        print(f"SD pipeline loaded successfully ({'SDXL' if is_sdxl else 'SD 2.1'})")
     
     return _sd_pipeline
 
@@ -197,7 +215,7 @@ async def generate_image_sd(req: SDImageRequest):
         JSON response with base64-encoded image and generation details
     """
     try:
-        model_default = os.getenv("IMAGE_SD_MODEL", "stabilityai/stable-diffusion-2-1-base")
+        model_default = os.getenv("IMAGE_SD_MODEL", "stabilityai/stable-diffusion-xl-base-1.0")
         model_id = req.model_id or model_default
 
         # Get cached pipeline
@@ -207,12 +225,23 @@ async def generate_image_sd(req: SDImageRequest):
         guidance = req.guidance_scale or 7.5
 
         print(f"Generating image with prompt: {req.prompt[:50]}...")
+        
+        # Check if it's SDXL and adjust default resolution if needed
+        is_sdxl = "xl" in model_id.lower() or "sdxl" in model_id.lower()
+        height = req.height
+        width = req.width
+        
+        # For SDXL, use 1024x1024 as default if not specified
+        if is_sdxl and height == 512 and width == 512:
+            height = 1024
+            width = 1024
+        
         image: Image.Image = pipe(
             req.prompt,
             num_inference_steps=steps,
             guidance_scale=guidance,
-            height=req.height,
-            width=req.width,
+            height=height,
+            width=width,
         ).images[0]
 
         # Convert image to base64

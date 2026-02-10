@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import { API_BASE } from '@/lib/config';
 
 export async function GET(
   request: NextRequest,
@@ -24,7 +25,7 @@ export async function GET(
     const auth = `Bearer ${session.access_token}`;
     
     // Forward to FastAPI backend with fresh token
-    const resp = await fetch(`http://127.0.0.1:8000/api/images/project/${projectId}`, {
+    const resp = await fetch(`${API_BASE}/api/images/project/${projectId}`, {
       headers: { 
         'Authorization': auth,
         'Content-Type': 'application/json'
@@ -36,19 +37,17 @@ export async function GET(
     });
     
     const text = await resp.text();
-    let data: any;
-    try { 
-      data = JSON.parse(text); 
-    } catch { 
-      data = { raw: text, error: text }; 
+    let data: unknown;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      data = { raw: text, error: text };
     }
     
     return NextResponse.json(data, { status: resp.status });
-  } catch (e: any) {
+  } catch (e: unknown) {
     console.error('[IMAGES API] Error fetching images:', e);
-    return NextResponse.json({ error: e?.message || 'Failed to fetch images' }, { status: 500 });
+    const message = e instanceof Error ? e.message : 'Failed to fetch images';
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
-
-
-

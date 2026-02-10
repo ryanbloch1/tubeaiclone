@@ -1,5 +1,7 @@
 'use client';
-import React from 'react';
+import React, { Suspense } from 'react';
+import Image from 'next/image';
+import Link from 'next/link';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 
@@ -11,13 +13,42 @@ type DbImage = {
   styled_prompt?: string;
   scene_number?: number;
   status?: string;
+  source_type?: 'generated' | 'uploaded';
   created_at?: string
 };
 
+const getErrorMessage = (error: unknown, fallback: string) => {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return fallback;
+};
+
 export default function ImagesPage() {
+  return (
+    <Suspense
+      fallback={(
+        <main className="min-h-screen bg-slate-50">
+          <div className="container mx-auto px-4 py-8">
+            <div className="max-w-6xl mx-auto">
+              <div className="bg-white rounded-lg border border-slate-200 p-8 text-center">
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+                <p className="mt-4 text-slate-600">Loading images...</p>
+              </div>
+            </div>
+          </div>
+        </main>
+      )}
+    >
+      <ImagesPageContent />
+    </Suspense>
+  );
+}
+
+function ImagesPageContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
-  const supabase = createClient();
+  const supabase = React.useMemo(() => createClient(), []);
   const [projectId, setProjectId] = React.useState<string | null>(null);
   const [scriptId, setScriptId] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState<boolean>(true);
@@ -30,6 +61,7 @@ export default function ImagesPage() {
   const [styleName, setStyleName] = React.useState<string | null>(null);
   const [expectedSceneCount, setExpectedSceneCount] = React.useState<number | null>(null);
   const [originalBasePrompts, setOriginalBasePrompts] = React.useState<Record<string, string>>({});
+  const [uploadingScenes, setUploadingScenes] = React.useState<Set<number>>(new Set());
 
   React.useEffect(() => {
     const pid = searchParams.get('projectId');
@@ -95,15 +127,12 @@ export default function ImagesPage() {
           return;
         }
         const imgData = await imgRes.json();
-        console.log('Loaded images from DB:', imgData);
         
         // Defensive check: ensure images is an array
         const fetchedImages = Array.isArray(imgData.images) ? imgData.images : [];
-        console.log(`Found ${fetchedImages.length} existing images in database`);
         
         // Filter out images without image_data_url (incomplete images)
         const validImages = fetchedImages.filter((img: DbImage) => img.image_data_url);
-        console.log(`Found ${validImages.length} valid images with image_data_url`);
         
         // Set images state first
         setImages(validImages);
@@ -133,14 +162,99 @@ export default function ImagesPage() {
         // Set loading to false after images state is set
         // React will batch these updates, but this ensures images are set before loading completes
         setLoading(false);
-      } catch (e: any) {
+      } catch (e: unknown) {
         console.error('Error loading images page:', e);
-        setError(e?.message || 'Failed to load page');
+        setError(getErrorMessage(e, 'Failed to load page'));
         setLoading(false);
       }
     }
     load();
-  }, [searchParams]);
+  }, [searchParams, supabase]);
+
+  const onUploadPhoto = async (sceneNumber: number, file: File) => {
+    try {
+      setUploadingScenes(prev => new Set(prev).add(sceneNumber));
+      setError(null);
+      
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session || !projectId) {
+        setError('Not authenticated or no project ID');
+        return;
+      }
+
+      // Convert file to base64
+      const reader = new FileReader();
+      reader.onloadend = async () => {
+        try {
+          const base64Data = (reader.result as string).split(',')[1]; // Remove data:image/...;base64, prefix
+          
+          const resp = await fetch('/api/images/upload', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${session.access_token}`,
+            },
+            body: JSON.stringify({
+              project_id: projectId,
+              scene_number: sceneNumber,
+              image_data: base64Data,
+              image_filename: file.name,
+            }),
+          });
+
+          if (!resp.ok) {
+            const errorData = await resp.json().catch(() => ({ error: 'Upload failed' }));
+            throw new Error(errorData.error || `HTTP ${resp.status}`);
+          }
+
+          await resp.json();
+          
+          // Reload images to show the uploaded photo
+          const imgRes = await fetch(`/api/images/project/${projectId}`, {
+            headers: { Authorization: `Bearer ${session.access_token}` },
+            cache: 'no-store'
+          });
+          
+          if (imgRes.ok) {
+            const imgData = await imgRes.json();
+            const fetchedImages = Array.isArray(imgData.images) ? imgData.images : [];
+            const validImages = fetchedImages.filter((img: DbImage) => img.image_data_url);
+            setImages(validImages);
+            
+            // Update original base prompts for new images
+            const basePrompts: Record<string, string> = {};
+            validImages.forEach((img: DbImage) => {
+              if (img.id && img.styled_prompt) {
+                basePrompts[img.id] = img.styled_prompt;
+              }
+            });
+            setOriginalBasePrompts(prev => ({ ...prev, ...basePrompts }));
+          }
+          
+        } catch (e: unknown) {
+          console.error('Error uploading photo:', e);
+          setError(getErrorMessage(e, 'Failed to upload photo'));
+        } finally {
+          setUploadingScenes(prev => {
+            const next = new Set(prev);
+            next.delete(sceneNumber);
+            return next;
+          });
+        }
+      };
+      
+      reader.readAsDataURL(file);
+      
+    } catch (e: unknown) {
+      console.error('Error setting up photo upload:', e);
+      setError(getErrorMessage(e, 'Failed to upload photo'));
+      setUploadingScenes(prev => {
+        const next = new Set(prev);
+        next.delete(sceneNumber);
+        return next;
+      });
+    }
+  };
 
   const onRegenerateImage = async (imageId: string, promptOverride?: string) => {
     try {
@@ -198,9 +312,9 @@ export default function ImagesPage() {
         delete next[imageId];
         return next;
       });
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.error('Error regenerating image:', e);
-      setError(e?.message || 'Failed to regenerate image');
+      setError(getErrorMessage(e, 'Failed to regenerate image'));
     } finally {
       setRegeneratingIds(prev => {
         const newSet = new Set(prev);
@@ -210,6 +324,7 @@ export default function ImagesPage() {
     }
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const onGenerate = async () => {
     try {
       setGenerating(true);
@@ -255,7 +370,6 @@ export default function ImagesPage() {
         return;
       }
 
-      console.log('Generating images with:', { project_id: projectId, script_id: scriptId });
 
       // Use fetch with streaming response
       const resp = await fetch('/api/images/generate', {
@@ -309,10 +423,8 @@ export default function ImagesPage() {
                 // Add image to list and update UI (replace loader with actual image)
                 newImages.push(data.image);
                 setImages([...newImages]); // Update state with new image
-                console.log('Received image:', data.image.scene_number);
               } else if (data.type === 'complete') {
                 // Generation complete - use final list from server
-                console.log('Image generation complete:', data.count);
                 setImages(data.images || newImages);
                 setExpectedSceneCount(null); // Clear expected count
 
@@ -341,9 +453,9 @@ export default function ImagesPage() {
         throw new Error('No images generated');
       }
 
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.error('Error generating images:', e);
-      setError(e?.message || 'Failed to generate images. Check the browser console for details.');
+      setError(getErrorMessage(e, 'Failed to generate images. Check the browser console for details.'));
     } finally {
       setGenerating(false);
     }
@@ -355,19 +467,19 @@ export default function ImagesPage() {
       <main className="min-h-screen bg-slate-50">
         <div className="container mx-auto px-4 py-8">
           <div className="max-w-6xl mx-auto">
-            <h1 className="text-3xl font-bold text-slate-900 mb-6">🎨 Images</h1>
+            <h1 className="text-3xl font-bold text-slate-900 mb-6">Images</h1>
             <div className="bg-white rounded-lg border border-slate-200 p-8 text-center">
-              <div className="text-5xl mb-4">🖼️</div>
+              <div className="text-5xl mb-4">Image</div>
               <h2 className="text-xl font-semibold text-slate-900 mb-2">No Project Selected</h2>
               <p className="text-slate-600 mb-6">
                 To generate images, please start or continue a project from the home page.
               </p>
-              <a
+              <Link
                 href="/"
                 className="inline-block bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg font-semibold transition-colors"
               >
                 Go to Home
-              </a>
+              </Link>
             </div>
           </div>
         </div>
@@ -379,30 +491,16 @@ export default function ImagesPage() {
     <main className="min-h-screen bg-slate-50">
       <div className="container mx-auto px-4 py-8">
         <div className="max-w-6xl mx-auto">
-          <h1 className="text-3xl font-bold text-slate-900 mb-6">🎨 Images</h1>
+          <h1 className="text-3xl font-bold text-slate-900 mb-6">📸 Property Photos</h1>
 
-          {/* Show generate/regenerate button - only when loading is complete */}
           {!loading && (
             <div className="bg-white rounded-lg border border-slate-200 p-6 shadow-sm mb-6">
-              <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-                <div className="flex-1">
-                  <h2 className="text-lg font-semibold text-slate-900 mb-2">
-                    {images.length > 0 ? 'Regenerate Scene Images' : 'Generate Scene Images'}
-                  </h2>
-                  <p className="text-slate-600 text-sm">
-                    {images.length > 0 
-                      ? 'Regenerate all images for each scene in your script.'
-                      : 'Images will be automatically generated for each scene in your script based on the visual descriptions.'}
-                  </p>
-                </div>
-                <button
-                  onClick={onGenerate}
-                  disabled={generating || !projectId || !scriptId}
-                  className="bg-green-600 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed text-white px-6 py-3 rounded-lg font-semibold transition-colors whitespace-nowrap"
-                >
-                  {generating ? 'Generating...' : images.length > 0 ? 'Regenerate All Images' : 'Generate Images'}
-                </button>
-              </div>
+              <h2 className="text-lg font-semibold text-slate-900 mb-2">
+                Upload photos for each scene
+              </h2>
+              <p className="text-slate-600 text-sm">
+                This tool now relies on your own property photos. Click on any scene card below to upload a photo that will be used in the final video.
+              </p>
             </div>
           )}
 
@@ -418,18 +516,16 @@ export default function ImagesPage() {
                 <div key={i} className="aspect-video bg-slate-200 animate-pulse rounded" />
               ))}
             </div>
-          ) : !loading && !generating && images.length === 0 ? (
+          ) : !loading && images.length === 0 ? (
             <div className="text-center py-16 bg-white border border-dashed border-slate-300 rounded-lg">
-              <div className="text-5xl mb-3">🖼️</div>
-              <h3 className="text-lg font-semibold text-slate-900 mb-2">No images yet</h3>
-              <p className="text-slate-600 mb-6">Click the button above to generate images for each scene in your script.</p>
-              <button
-                onClick={onGenerate}
-                disabled={generating || !projectId}
-                className="bg-green-600 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed text-white px-6 py-3 rounded-lg font-semibold transition-colors"
-              >
-                {generating ? 'Generating...' : 'Generate Starter Set'}
-              </button>
+              <div className="text-5xl mb-3">Image</div>
+              <h3 className="text-lg font-semibold text-slate-900 mb-2">No photos yet</h3>
+              <p className="text-slate-600 mb-2">
+                Upload at least one photo for each scene in your script. These photos will be used when compiling the final video.
+              </p>
+              <p className="text-slate-500 text-sm">
+                Use the &quot;Upload Photo&quot; button on each scene card below once scenes appear here.
+              </p>
             </div>
           ) : (
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
@@ -443,9 +539,12 @@ export default function ImagesPage() {
                     {(() => {
                       if (image?.image_data_url) {
                         return (
-                          <img
+                          <Image
                             src={image.image_data_url}
                             alt={image.prompt || `Scene ${image.scene_number || sceneNumber}`}
+                            width={1280}
+                            height={720}
+                            unoptimized
                             className="w-full h-auto"
                           />
                         );
@@ -470,26 +569,84 @@ export default function ImagesPage() {
                         </div>
                       );
                     })()}
-                    {/* Regenerate button - shows on hover when image exists */}
+                    {/* Upload/Regenerate buttons - shows on hover when image exists */}
                     {image?.image_data_url && (
-                      <button
-                        onClick={() => {
-                          const basePrompt = originalBasePrompts[image.id] || image.styled_prompt || 'Photorealistic cinematic lighting, ultra-detailed.';
-                          const addition = additionalPrompts[image.id] || '';
-                          const combinedPrompt = [basePrompt, addition.trim()].filter(Boolean).join(' ');
-                          onRegenerateImage(image.id, combinedPrompt || basePrompt);
-                        }}
-                        disabled={regeneratingIds.has(image.id)}
-                        className="absolute top-2 right-2 bg-black/70 hover:bg-black/90 disabled:opacity-50 text-white px-3 py-1.5 rounded-lg text-xs font-medium transition-opacity opacity-0 group-hover:opacity-100 disabled:cursor-not-allowed"
-                        title="Regenerate this image"
-                      >
-                        {regeneratingIds.has(image.id) ? 'Generating...' : '🔄 Regenerate'}
-                      </button>
+                      <div className="absolute top-2 right-2 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <label className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white px-3 py-1.5 rounded-lg text-xs font-medium cursor-pointer disabled:cursor-not-allowed">
+                          Upload Photo
+                          <input
+                            type="file"
+                            accept="image/*"
+                            className="hidden"
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (file && image.scene_number) {
+                                onUploadPhoto(image.scene_number, file);
+                              }
+                            }}
+                            disabled={uploadingScenes.has(image.scene_number || 0)}
+                          />
+                        </label>
+                        <button
+                          onClick={() => {
+                            const basePrompt = originalBasePrompts[image.id] || image.styled_prompt || 'Photorealistic cinematic lighting, ultra-detailed.';
+                            const addition = additionalPrompts[image.id] || '';
+                            const combinedPrompt = [basePrompt, addition.trim()].filter(Boolean).join(' ');
+                            onRegenerateImage(image.id, combinedPrompt || basePrompt);
+                          }}
+                          disabled={regeneratingIds.has(image.id)}
+                          className="bg-black/70 hover:bg-black/90 disabled:opacity-50 text-white px-3 py-1.5 rounded-lg text-xs font-medium disabled:cursor-not-allowed"
+                          title="Regenerate this image"
+                        >
+                          {regeneratingIds.has(image.id) ? 'Generating...' : 'Regenerate'}
+                        </button>
+                      </div>
+                    )}
+                    {/* Upload button for scenes without images */}
+                    {!image?.image_data_url && !generating && (
+                      <label className="absolute inset-0 flex items-center justify-center bg-slate-900/50 hover:bg-slate-900/70 text-white cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity">
+                        <div className="text-center">
+                          <div className="text-2xl mb-1">Upload</div>
+                          <div className="text-xs font-medium">Upload Photo</div>
+                        </div>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              onUploadPhoto(sceneNumber, file);
+                            }
+                          }}
+                          disabled={uploadingScenes.has(sceneNumber)}
+                        />
+                      </label>
+                    )}
+                    {uploadingScenes.has(sceneNumber) && (
+                      <div className="absolute inset-0 flex items-center justify-center bg-slate-900/70 text-white">
+                        <div className="text-center">
+                          <div className="h-8 w-8 rounded-full border-4 border-white/30 border-t-white animate-spin mx-auto mb-2" />
+                          <div className="text-xs">Uploading...</div>
+                        </div>
+                      </div>
                     )}
                     {(image?.scene_number || image?.prompt) && (
                       <div className="p-2 bg-slate-50 border-t border-slate-200">
                         {image.scene_number && (
-                          <div className="text-xs font-semibold text-slate-600 mb-1">Scene {image.scene_number}</div>
+                          <div className="flex items-center justify-between mb-1">
+                            <div className="text-xs font-semibold text-slate-600">Scene {image.scene_number}</div>
+                            {image.source_type === 'uploaded' && (
+                              <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">
+                                Uploaded
+                              </span>
+                            )}
+                            {image.source_type === 'generated' && (
+                              <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-medium">
+                                🤖 AI Generated
+                              </span>
+                            )}
+                          </div>
                         )}
                         <button
                           type="button"
@@ -567,7 +724,7 @@ export default function ImagesPage() {
                 }}
                 className="bg-purple-600 hover:bg-purple-700 text-white px-8 py-3 rounded-lg font-semibold transition-colors flex items-center space-x-2"
               >
-                <span>🎬</span>
+                <span>Video</span>
                 <span>Continue to Video Compilation</span>
               </button>
             </div>
@@ -577,5 +734,3 @@ export default function ImagesPage() {
     </main>
   );
 }
-
-

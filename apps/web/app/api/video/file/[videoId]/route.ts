@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import { API_BASE } from '@/lib/config';
 
 export async function GET(
   request: NextRequest,
@@ -39,8 +40,7 @@ export async function GET(
     }
 
     // Proxy request to FastAPI backend
-    const apiBase = process.env.NEXT_PUBLIC_API_BASE || 'http://127.0.0.1:8000';
-    const backendUrl = `${apiBase}/api/video/file/${videoId}`;
+    const backendUrl = `${API_BASE}/api/video/file/${videoId}`;
     
     const session = await supabase.auth.getSession();
     const resp = await fetch(backendUrl, {
@@ -70,4 +70,3 @@ export async function GET(
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
-

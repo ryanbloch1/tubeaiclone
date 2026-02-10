@@ -11,6 +11,7 @@ import asyncio
 
 from auth.verify import verify_token
 from db.client import get_supabase
+from services.photo_analysis import analyse_image_bytes
 
 router = APIRouter()
 
@@ -25,6 +26,23 @@ class ImageGenerateRequest(BaseModel):
 class ImageRegenerateRequest(BaseModel):
     image_id: str
     prompt: Optional[str] = None
+
+class ImageUploadRequest(BaseModel):
+    project_id: str
+    scene_number: int
+    image_data: str  # Base64 encoded image
+    image_filename: Optional[str] = None
+
+
+class ProjectPhotoUploadRequest(BaseModel):
+    project_id: str
+    image_data: str  # Base64 encoded image (data URL or raw base64)
+    image_filename: Optional[str] = None
+
+
+class ProjectPhotosReorderRequest(BaseModel):
+    project_id: str
+    image_ids: list[str]
 
 
 def _parse_scenes_from_script(script_text: str) -> List[dict]:
@@ -94,6 +112,9 @@ STYLE_PROMPT_MAP = {
     'Studio Ghibli': 'Studio Ghibli inspired animation, painterly backgrounds, whimsical atmosphere',
     'Cyberpunk Neon': 'Cyberpunk neon aesthetic, glowing city lights, high contrast futuristic styling',
     'Watercolor Storybook': 'Soft watercolor storybook illustration, gentle hues, textured paper feel',
+    # Real estate styles
+    'Professional Real Estate': 'Professional real estate photography, HDR, wide angle lens, natural lighting, magazine quality, architectural photography',
+    'Luxury Property': 'Luxury real estate photography, architectural details, premium finishes, magazine quality, high-end interior design, elegant composition',
 }
 
 
@@ -103,13 +124,36 @@ def _apply_style_to_prompt(style_name: Optional[str], prompt: str) -> str:
     return f"{descriptor}. {prompt}"
 
 
-def _generate_image_prompt_for_scene(scene: dict, use_ai: bool = False) -> str:
+def _generate_image_prompt_for_scene(scene: dict, use_ai: bool = False, project_data: Optional[dict] = None) -> str:
     """Generate an image generation prompt for a scene."""
     # If visuals are explicitly provided, use them
     if scene.get('visuals'):
         visuals = scene['visuals']
         # Clean up markdown formatting
         visuals = _clean_text(visuals)
+        
+        # Enhance for real estate context if applicable
+        if project_data:
+            video_type = project_data.get('video_type')
+            property_type = project_data.get('property_type')
+            bedrooms = project_data.get('bedrooms')
+            bathrooms = project_data.get('bathrooms')
+            property_features = project_data.get('property_features')
+            
+            if video_type == 'listing' and property_type:
+                # Enhance with real estate-specific context
+                re_context = []
+                if property_type:
+                    re_context.append(f"{property_type.replace('_', ' ')}")
+                if bedrooms is not None and bathrooms is not None:
+                    re_context.append(f"{bedrooms} bedrooms, {bathrooms} bathrooms")
+                if property_features:
+                    features_str = ", ".join([f.replace('_', ' ') for f in property_features[:3]])
+                    re_context.append(f"featuring {features_str}")
+                
+                if re_context:
+                    visuals = f"Professional real estate photography, {', '.join(re_context)}, {visuals}, natural lighting, wide angle lens, HDR quality, architectural photography"
+        
         # Enhance with AI if requested and API key available
         if use_ai:
             try:
@@ -183,14 +227,26 @@ async def generate_images(req: ImageGenerateRequest, user_id: str = Depends(veri
     try:
         supabase = get_supabase()
 
-        # Verify project ownership
-        project_result = supabase.table('projects').select('id, style').eq('id', req.project_id).eq('user_id', user_id).execute()
+        # Verify project ownership and fetch project data
+        project_result = supabase.table('projects').select(
+            'id, style, video_type, property_type, bedrooms, bathrooms, property_features'
+        ).eq('id', req.project_id).eq('user_id', user_id).execute()
         if not project_result.data:
             raise HTTPException(status_code=403, detail="Project not found or access denied")
         
-        project_style = project_result.data[0].get('style') if project_result.data else None
+        project_data = project_result.data[0]
+        project_style = project_data.get('style') if project_data else None
         style_source = req.style_name or project_style or 'Photorealistic'
         style_name = style_source.strip() if isinstance(style_source, str) else 'Photorealistic'
+        
+        # Parse property_features if it's a JSON string
+        if project_data.get('property_features'):
+            try:
+                import json
+                if isinstance(project_data['property_features'], str):
+                    project_data['property_features'] = json.loads(project_data['property_features'])
+            except:
+                project_data['property_features'] = []
 
         # If script_id not provided, pick the latest script for the project
         script_id = req.script_id
@@ -286,10 +342,45 @@ async def generate_images(req: ImageGenerateRequest, user_id: str = Depends(veri
                     
                 scene_id = scene_id_map[scene_num]
                 
+                # Check if there's already an uploaded photo for this scene
+                existing_image = (
+                    supabase.table('images')
+                    .select('id, image_data, source_type')
+                    .eq('scene_id', scene_id)
+                    .eq('source_type', 'uploaded')
+                    .limit(1)
+                    .execute()
+                )
+                
+                # If uploaded photo exists, use it instead of generating
+                if existing_image.data and len(existing_image.data) > 0:
+                    uploaded_img = existing_image.data[0]
+                    print(f"Scene {scene_num}: Using uploaded photo (ID: {uploaded_img['id']})")
+                    
+                    # Yield the uploaded image
+                    transformed_images.append({
+                        'id': uploaded_img['id'],
+                        'scene_id': scene_id,
+                        'scene_number': scene_num,
+                        'image_data_url': uploaded_img.get('image_data'),
+                        'prompt': scene_data.get('narration') or scene_data.get('text', f"Scene {scene_num}"),
+                        'styled_prompt': f"Uploaded property photo for Scene {scene_num}",
+                        'status': 'completed',
+                        'source_type': 'uploaded'
+                    })
+                    
+                    # Stream the uploaded image
+                    yield f"data: {json.dumps({'type': 'image', 'image': transformed_images[-1]})}\n\n"
+                    continue
+                
+                # No uploaded photo - generate AI image
+                print(f"Scene {scene_num}: No uploaded photo found, generating AI image")
+                
                 # Generate prompt for this scene (for image generation)
                 image_prompt = _generate_image_prompt_for_scene(
                     scene_data, 
-                    use_ai=bool(use_ai_enhancement and use_ai_enhancement not in ['your_api_key_here', 'YOUR_KEY_HERE'])
+                    use_ai=bool(use_ai_enhancement and use_ai_enhancement not in ['your_api_key_here', 'YOUR_KEY_HERE']),
+                    project_data=project_data
                 )
                 styled_prompt = _apply_style_to_prompt(style_name, image_prompt)
                 
@@ -316,14 +407,16 @@ async def generate_images(req: ImageGenerateRequest, user_id: str = Depends(veri
                     import io
                     
                     # Use the same SD model as main.py
-                    sd_model = os.getenv("IMAGE_SD_MODEL", "stabilityai/stable-diffusion-2-1-base")
+                    sd_model = os.getenv("IMAGE_SD_MODEL", "stabilityai/stable-diffusion-xl-base-1.0")
                     
                     try:
                         # Import SD components (same as main.py)
-                        from diffusers import StableDiffusionPipeline
                         import torch
                         
                         print(f"Generating image for scene {scene_num} with prompt: {styled_prompt[:50]}...")
+                        
+                        # Check if it's an SDXL model
+                        is_sdxl = "xl" in sd_model.lower() or "sdxl" in sd_model.lower()
                         
                         # Use a module-level cache (similar to main.py's global cache)
                         global _sd_pipeline_cache, _sd_model_cache
@@ -344,21 +437,44 @@ async def generate_images(req: ImageGenerateRequest, user_id: str = Depends(veri
                                 device = "cpu"
                                 dtype = torch.float32
                             
-                            print(f"Loading SD pipeline: {sd_model} on {device}")
-                            _sd_pipeline_cache = StableDiffusionPipeline.from_pretrained(sd_model, torch_dtype=dtype)
+                            print(f"Loading SD pipeline: {sd_model} on {device} ({'SDXL' if is_sdxl else 'SD 2.1'})")
+                            
+                            if is_sdxl:
+                                from diffusers import StableDiffusionXLPipeline
+                                _sd_pipeline_cache = StableDiffusionXLPipeline.from_pretrained(sd_model, torch_dtype=dtype)
+                            else:
+                                from diffusers import StableDiffusionPipeline
+                                _sd_pipeline_cache = StableDiffusionPipeline.from_pretrained(sd_model, torch_dtype=dtype)
+                            
                             _sd_pipeline_cache = _sd_pipeline_cache.to(device)
                             _sd_model_cache = sd_model
                             print("SD pipeline loaded successfully")
                         
                         pipe = _sd_pipeline_cache
                         
-                        # Generate image (same parameters as /images/sd/generate endpoint)
+                        # Determine resolution based on model and video type
+                        # For real estate videos, use 16:9 aspect ratio (1920x1080)
+                        # For SDXL, default to 1024x1024, but can use 1920x1080 for real estate
+                        if project_data and project_data.get('video_type') == 'listing':
+                            # Real estate videos: 16:9 aspect ratio
+                            height = 1080
+                            width = 1920
+                        elif is_sdxl:
+                            # SDXL default: 1024x1024
+                            height = 1024
+                            width = 1024
+                        else:
+                            # SD 2.1 default: 512x512
+                            height = 512
+                            width = 512
+                        
+                        # Generate image
                         image: Image.Image = pipe(
                             styled_prompt,
                             num_inference_steps=30,
                             guidance_scale=7.5,
-                            height=512,
-                            width=512,
+                            height=height,
+                            width=width,
                         ).images[0]
                         
                         # Convert to base64 (same as main.py)
@@ -388,47 +504,75 @@ async def generate_images(req: ImageGenerateRequest, user_id: str = Depends(veri
                     data_url = _svg_data_url(styled_prompt)
                 
                 # Save image to database immediately (this always runs, outside try/except)
-                image_row = {
-                    'id': img_id,
-                    'scene_id': scene_id,
-                    'prompt_text': styled_prompt,  # Store image generation prompt with style
-                    'image_data': data_url,
-                    'status': 'completed'
-                }
+                # Check if there's already an image for this scene
+                existing_check = (
+                    supabase.table('images')
+                    .select('id, source_type')
+                    .eq('scene_id', scene_id)
+                    .limit(1)
+                    .execute()
+                )
                 
-                insert_res = supabase.table('images').insert(image_row).execute()
-                if insert_res.data:
-                    inserted_img = insert_res.data[0]
-                    # Get scene_number
-                    scene_num_found = None
-                    for num, sid in scene_id_map.items():
-                        if sid == inserted_img.get('scene_id'):
-                            scene_num_found = num
-                            break
-                    
-                    transformed_img = {
-                        'id': inserted_img['id'],
-                        'scene_id': inserted_img.get('scene_id'),
-                        'image_data_url': inserted_img.get('image_data'),
-                        'prompt': display_text or image_prompt,  # Use clean narration for display, fallback to prompt
-                        'styled_prompt': styled_prompt,
-                        'scene_number': scene_num_found,
-                        'status': inserted_img.get('status'),
-                        'created_at': inserted_img.get('created_at')
+                inserted_img = None
+                if existing_check.data and len(existing_check.data) > 0:
+                    # Update existing image (but only if it's not an uploaded photo)
+                    existing_img = existing_check.data[0]
+                    existing_source = existing_img.get('source_type', 'generated')
+                    if existing_source != 'uploaded':
+                        # Update generated image
+                        image_id = existing_img['id']
+                        update_res = supabase.table('images').update({
+                            'prompt_text': styled_prompt,
+                            'image_data': data_url,
+                            'status': 'completed',
+                            'source_type': 'generated'
+                        }).eq('id', image_id).execute()
+                        if update_res.data:
+                            inserted_img = update_res.data[0]
+                            img_id = image_id
+                    else:
+                        # Don't overwrite uploaded photos - skip this scene
+                        print(f"Scene {scene_num}: Skipping - uploaded photo exists")
+                        continue
+                else:
+                    # Create new image
+                    image_row = {
+                        'id': img_id,
+                        'scene_id': scene_id,
+                        'prompt_text': styled_prompt,  # Store image generation prompt with style
+                        'image_data': data_url,
+                        'status': 'completed',
+                        'source_type': 'generated'
                     }
-                    transformed_images.append(transformed_img)
                     
-                    # Yield this image immediately
-                    yield f"data: {json.dumps({'type': 'image', 'image': transformed_img})}\n\n"
-                    await asyncio.sleep(0.1)  # Small delay to ensure frontend processes
-            
-            # Update project status to 'images'
-            try:
-                supabase.table('projects').update({'status': 'images'}).eq('id', req.project_id).execute()
-            except Exception:
-                pass
-            
-            # Send completion message
+                    insert_res = supabase.table('images').insert(image_row).execute()
+                    if insert_res.data:
+                        inserted_img = insert_res.data[0]
+                
+                if not inserted_img:
+                    print(f"Failed to save image for scene {scene_num}")
+                    continue
+                # Get scene_number
+                scene_num_found = None
+                for num, sid in scene_id_map.items():
+                    if sid == inserted_img.get('scene_id'):
+                        scene_num_found = num
+                        break
+                
+                transformed_img = {
+                    'id':       inserted_img['id'],
+                    'scene_id': inserted_img.get('scene_id'),
+                    'image_data_url': inserted_img.get('image_data'),
+                    'prompt':      display_text or image_prompt,  # clean narration or prompt
+                    'styled_prompt': styled_prompt,
+                    'scene_number':  scene_num_found,
+                    'source_type':   'generated',
+                    'status':        inserted_img.get('status'),
+                    'created_at':    inserted_img.get('created_at'),
+                }
+                transformed_images.append(transformed_img)
+                yield f"data: {json.dumps({'type': 'image', 'image': transformed_img})}\n\n"
+
             yield f"data: {json.dumps({'type': 'complete', 'count': len(transformed_images), 'images': transformed_images})}\n\n"
         
         return StreamingResponse(
@@ -496,11 +640,13 @@ async def regenerate_image(req: ImageRegenerateRequest, user_id: str = Depends(v
             from PIL import Image
             import io
             
-            sd_model = os.getenv("IMAGE_SD_MODEL", "stabilityai/stable-diffusion-2-1-base")
+            sd_model = os.getenv("IMAGE_SD_MODEL", "stabilityai/stable-diffusion-xl-base-1.0")
             
             try:
-                from diffusers import StableDiffusionPipeline
                 import torch
+                
+                # Check if it's an SDXL model
+                is_sdxl = "xl" in sd_model.lower() or "sdxl" in sd_model.lower()
                 
                 print(f"Regenerating image {req.image_id} with prompt: {prompt_text[:50]}...")
                 
@@ -520,20 +666,35 @@ async def regenerate_image(req: ImageRegenerateRequest, user_id: str = Depends(v
                         device = "cpu"
                         dtype = torch.float32
                     
-                    print(f"Loading SD pipeline: {sd_model} on {device}")
-                    _sd_pipeline_cache = StableDiffusionPipeline.from_pretrained(sd_model, torch_dtype=dtype)
+                    print(f"Loading SD pipeline: {sd_model} on {device} ({'SDXL' if is_sdxl else 'SD 2.1'})")
+                    
+                    if is_sdxl:
+                        from diffusers import StableDiffusionXLPipeline
+                        _sd_pipeline_cache = StableDiffusionXLPipeline.from_pretrained(sd_model, torch_dtype=dtype)
+                    else:
+                        from diffusers import StableDiffusionPipeline
+                        _sd_pipeline_cache = StableDiffusionPipeline.from_pretrained(sd_model, torch_dtype=dtype)
+                    
                     _sd_pipeline_cache = _sd_pipeline_cache.to(device)
                     _sd_model_cache = sd_model
                     print("SD pipeline loaded successfully")
                 
                 pipe = _sd_pipeline_cache
                 
+                # Use appropriate resolution
+                if is_sdxl:
+                    height = 1024
+                    width = 1024
+                else:
+                    height = 512
+                    width = 512
+                
                 image: Image.Image = pipe(
                     prompt_text,
                     num_inference_steps=30,
                     guidance_scale=7.5,
-                    height=512,
-                    width=512,
+                    height=height,
+                    width=width,
                 ).images[0]
                 
                 buf = io.BytesIO()
@@ -645,6 +806,7 @@ async def list_images_for_project(project_id: str, user_id: str = Depends(verify
                     'styled_prompt': img.get('prompt_text', ''),  # Store original base prompt
                     'scene_number': img.get('scenes', {}).get('scene_number') if isinstance(img.get('scenes'), dict) else None,
                     'status': img.get('status'),
+                    'source_type': img.get('source_type', 'generated'),
                     'created_at': img.get('created_at')
                 })
         
@@ -655,4 +817,366 @@ async def list_images_for_project(project_id: str, user_id: str = Depends(verify
         raise HTTPException(status_code=500, detail=f"Failed to fetch images: {str(e)}")
 
 
+@router.post("/upload")
+async def upload_image(req: ImageUploadRequest, user_id: str = Depends(verify_token)):
+    """
+    Upload a real property photo and associate it with a scene.
+    For property listings, agents should upload actual photos instead of generating AI images.
+    """
+    try:
+        supabase = get_supabase()
+        
+        # Verify project ownership
+        project_result = supabase.table('projects').select('id, video_type').eq('id', req.project_id).eq('user_id', user_id).execute()
+        if not project_result.data:
+            raise HTTPException(status_code=403, detail="Project not found or access denied")
+        
+        project = project_result.data[0]
+        
+        # Get the latest script for this project
+        script_result = (
+            supabase.table('scripts')
+            .select('id')
+            .eq('project_id', req.project_id)
+            .order('created_at', desc=True)
+            .limit(1)
+            .execute()
+        )
+        
+        if not script_result.data:
+            raise HTTPException(status_code=400, detail="No script found for this project")
+        
+        script_id = script_result.data[0]['id']
+        
+        # Find or create the scene for this scene_number
+        scene_result = (
+            supabase.table('scenes')
+            .select('id')
+            .eq('script_id', script_id)
+            .eq('scene_number', req.scene_number)
+            .limit(1)
+            .execute()
+        )
+        
+        scene_id = None
+        if scene_result.data and len(scene_result.data) > 0:
+            scene_id = scene_result.data[0]['id']
+        else:
+            # Create scene if it doesn't exist
+            new_scene = (
+                supabase.table('scenes')
+                .insert({
+                    'script_id': script_id,
+                    'scene_number': req.scene_number,
+                    'description': f"Scene {req.scene_number} - Uploaded photo"
+                })
+                .execute()
+            )
+            if new_scene.data:
+                scene_id = new_scene.data[0]['id']
+            else:
+                raise HTTPException(status_code=500, detail="Failed to create scene")
+        
+        # Process image data
+        image_data = req.image_data
+        img_bytes: bytes | None = None
 
+        if image_data.startswith('data:image'):
+            # Already in data URL format: data:image/{ext};base64,{...}
+            image_data_url = image_data
+            try:
+                header, data_b64 = image_data.split(',', 1)
+                img_bytes = base64.b64decode(data_b64)
+            except Exception:
+                img_bytes = None
+        else:
+            # Assume it's raw base64, convert to data URL and decode bytes
+            ext = 'jpeg'
+            if req.image_filename:
+                filename_lower = req.image_filename.lower()
+                if '.png' in filename_lower:
+                    ext = 'png'
+                elif '.jpg' in filename_lower or '.jpeg' in filename_lower:
+                    ext = 'jpeg'
+            image_data_url = f"data:image/{ext};base64,{image_data}"
+            try:
+                img_bytes = base64.b64decode(image_data)
+            except Exception:
+                img_bytes = None
+
+        # Analyse the uploaded photo with BLIP, if possible
+        analysis = None
+        if img_bytes:
+            try:
+                analysis = analyse_image_bytes(img_bytes)
+            except Exception as e:
+                # Photo analysis is best-effort; failures should not block upload
+                print(f"[PHOTO_ANALYSIS] Failed to analyse uploaded image: {e}")
+        
+        # Check if there's already an image for this scene
+        existing_image = (
+            supabase.table('images')
+            .select('id')
+            .eq('scene_id', scene_id)
+            .limit(1)
+            .execute()
+        )
+        
+        if existing_image.data and len(existing_image.data) > 0:
+            # Update existing image
+            image_id = existing_image.data[0]['id']
+            update_payload: dict = {
+                'image_data': image_data_url,
+                'source_type': 'uploaded',
+                'status': 'completed',
+                'prompt_text': f"Uploaded property photo for Scene {req.scene_number}",
+            }
+            if analysis:
+                update_payload['photo_analysis'] = analysis
+                update_payload['scene_type'] = analysis.get('scene_type')
+
+            update_result = (
+                supabase.table('images')
+                .update(update_payload)
+                .eq('id', image_id)
+                .execute()
+            )
+        else:
+            # Create new image record
+            insert_payload: dict = {
+                'scene_id': scene_id,
+                'image_data': image_data_url,
+                'prompt_text': f"Uploaded property photo for Scene {req.scene_number}",
+                'source_type': 'uploaded',
+                'status': 'completed',
+            }
+            if analysis:
+                insert_payload['photo_analysis'] = analysis
+                insert_payload['scene_type'] = analysis.get('scene_type')
+
+            insert_result = (
+                supabase.table('images')
+                .insert(insert_payload)
+                .execute()
+            )
+            
+            if not insert_result.data:
+                raise HTTPException(status_code=500, detail="Failed to save uploaded image")
+            image_id = insert_result.data[0]['id']
+        
+        return {
+            'success': True,
+            'image_id': image_id,
+            'scene_number': req.scene_number,
+            'message': 'Photo uploaded successfully'
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to upload image: {str(e)}")
+
+
+@router.post("/project-photos/upload")
+async def upload_project_photo(
+    req: ProjectPhotoUploadRequest,
+    user_id: str = Depends(verify_token),
+):
+    """
+    Upload a property photo tied only to the project (no script/scenes yet).
+    This supports the images-first flow: photos are uploaded before any script is generated.
+    """
+    try:
+        supabase = get_supabase()
+
+        # Verify project ownership
+        project_result = (
+            supabase.table("projects")
+            .select("id")
+            .eq("id", req.project_id)
+            .eq("user_id", user_id)
+            .execute()
+        )
+        if not project_result.data:
+            raise HTTPException(status_code=403, detail="Project not found or access denied")
+
+        # Decode image bytes and keep a data URL for storage
+        image_data = req.image_data
+        img_bytes: bytes | None = None
+
+        if image_data.startswith("data:image"):
+            # Already a data URL: data:image/{ext};base64,{...}
+            image_data_url = image_data
+            try:
+                _, data_b64 = image_data.split(",", 1)
+                img_bytes = base64.b64decode(data_b64)
+            except Exception:
+                img_bytes = None
+        else:
+            # Raw base64; wrap in a data URL and decode bytes
+            ext = "jpeg"
+            if req.image_filename:
+                lower = req.image_filename.lower()
+                if ".png" in lower:
+                    ext = "png"
+                elif ".jpg" in lower or ".jpeg" in lower:
+                    ext = "jpeg"
+            image_data_url = f"data:image/{ext};base64,{image_data}"
+            try:
+                img_bytes = base64.b64decode(image_data)
+            except Exception:
+                img_bytes = None
+
+        # Analyse photo with BLIP (best-effort)
+        analysis = None
+        if img_bytes:
+            try:
+                analysis = analyse_image_bytes(img_bytes)
+            except Exception as e:
+                print(f"[PHOTO_ANALYSIS] Failed to analyse project photo: {e}")
+
+        # Determine next sort_index for this project's uploaded photos
+        next_sort_index = 1
+        try:
+            sort_res = (
+                supabase.table("images")
+                .select("sort_index")
+                .eq("project_id", req.project_id)
+                .eq("source_type", "uploaded")
+                .order("sort_index", desc=True)
+                .limit(1)
+                .execute()
+            )
+            if sort_res.data and sort_res.data[0].get("sort_index") is not None:
+                next_sort_index = int(sort_res.data[0]["sort_index"]) + 1
+        except Exception as e:
+            print(f"[PROJECT_PHOTOS] Failed to compute next sort_index: {e}")
+
+        # Create a new image row linked only to the project
+        insert_payload: dict = {
+            "project_id": req.project_id,
+            "scene_id": None,
+            "image_data": image_data_url,
+            "prompt_text": "Uploaded project-level property photo",
+            "source_type": "uploaded",
+            "status": "completed",
+            "sort_index": next_sort_index,
+        }
+        if analysis:
+            insert_payload["photo_analysis"] = analysis
+            insert_payload["scene_type"] = analysis.get("scene_type")
+
+        try:
+            insert_res = supabase.table("images").insert(insert_payload).execute()
+            if not insert_res.data:
+                raise HTTPException(status_code=500, detail="Failed to save project photo")
+
+            image_id = insert_res.data[0]["id"]
+
+            return {
+                "success": True,
+                "image_id": image_id,
+                "message": "Project photo uploaded successfully",
+            }
+        except Exception as db_error:
+            print(f"[PROJECT_PHOTOS] Database insert error: {db_error}")
+            print(f"[PROJECT_PHOTOS] Insert payload keys: {list(insert_payload.keys())}")
+            raise
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[PROJECT_PHOTOS] Upload error: {type(e).__name__}: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to upload project photo: {e}")
+
+
+@router.get("/project-photos/{project_id}")
+async def list_project_photos(project_id: str, user_id: str = Depends(verify_token)):
+    """
+    List project-level uploaded photos for a project (no scenes required).
+    Used on the Script page for ordering and status.
+    """
+    try:
+        supabase = get_supabase()
+
+        # Verify project ownership
+        project_result = (
+            supabase.table("projects")
+            .select("id")
+            .eq("id", project_id)
+            .eq("user_id", user_id)
+            .execute()
+        )
+        if not project_result.data:
+            raise HTTPException(status_code=403, detail="Project not found or access denied")
+
+        photos_res = (
+            supabase.table("images")
+            .select("id, image_data, image_url, photo_analysis, sort_index, created_at, source_type")
+            .eq("project_id", project_id)
+            .eq("source_type", "uploaded")
+            .order("sort_index", desc=False)
+            .order("created_at", desc=False)
+            .execute()
+        )
+
+        print(f"[LIST_PROJECT_PHOTOS] Found {len(photos_res.data) if photos_res.data else 0} photos for project {project_id}")
+
+        photos = []
+        if photos_res.data:
+            for img in photos_res.data:
+                image_data_url = img.get("image_data") or img.get("image_url")
+                analysed = bool(img.get("photo_analysis"))
+                photos.append(
+                    {
+                        "id": img["id"],
+                        "image_data_url": image_data_url,
+                        "analysed": analysed,
+                        "created_at": img.get("created_at"),
+                        "sort_index": img.get("sort_index"),
+                    }
+                )
+                print(f"[LIST_PROJECT_PHOTOS] Photo {img['id']}: has_data={bool(image_data_url)}, analysed={analysed}")
+
+        return {"success": True, "photos": photos}
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[LIST_PROJECT_PHOTOS] Error: {type(e).__name__}: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to fetch project photos: {e}")
+
+
+@router.post("/project-photos/reorder")
+async def reorder_project_photos(
+    req: ProjectPhotosReorderRequest,
+    user_id: str = Depends(verify_token),
+):
+    """
+    Persist a new order for project-level photos by updating sort_index.
+    """
+    try:
+        supabase = get_supabase()
+
+        # Verify project ownership
+        project_result = (
+            supabase.table("projects")
+            .select("id")
+            .eq("id", req.project_id)
+            .eq("user_id", user_id)
+            .execute()
+        )
+        if not project_result.data:
+            raise HTTPException(status_code=403, detail="Project not found or access denied")
+
+        # Update sort_index based on provided order
+        for idx, image_id in enumerate(req.image_ids):
+            supabase.table("images").update({"sort_index": idx + 1}).eq("id", image_id).execute()
+
+        return {"success": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to reorder project photos: {e}")

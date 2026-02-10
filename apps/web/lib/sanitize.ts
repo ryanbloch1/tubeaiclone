@@ -60,7 +60,6 @@ export function sanitizeScriptForVoiceover(input: string): string {
     //  - else drop the block
     line = line.replace(/\[[^\]]+\]/g, (block) => {
       const inner = block.slice(1, -1); // remove [ ]
-      const lowered = inner.toLowerCase();
 
       const isNarration = /(voice\s*over|voiceover|narrator|narration|voice over|the narrator says|a narrator says|voice:|narrator:)/i.test(inner);
       if (!isNarration) {
@@ -154,5 +153,4 @@ export function imageCountForVideoLength(option: VideoLengthOption): number {
       return 10;
   }
 }
-
 

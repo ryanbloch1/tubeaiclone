@@ -21,8 +21,17 @@ ENV/
 apps/web/.next/
 apps/web/node_modules/
 
-# Env files
-.env.bak
-.env.local
-apps/web/.env.local
+# Env files (should NEVER be committed - contains sensitive API keys and credentials)
 .env
+.env.*
+*.env
+apps/api/.env
+apps/web/.env.local
+apps/web/.env
+
+# Database migrations (user-specific, should not be in source control)
+supabase/migrations/
+
+# Cursor plans (IDE-specific, should not be in source control)
+.cursor/
+*.plan.md
