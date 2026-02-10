@@ -17,7 +17,7 @@ export default function Navbar() {
   };
 
   const navItems = [
-    { href: '/', label: 'Home', icon: '🏠' },
+    { href: '/', label: 'Home', icon: 'H' },
   ];
 
   return (
@@ -77,7 +77,7 @@ export default function Navbar() {
                     Sign In
                   </Button>
                 </Link>
-                <Link href="/register">
+                <Link href="/signup">
                   <Button size="sm">
                     Get Started
                   </Button>

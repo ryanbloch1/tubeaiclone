@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import { API_BASE } from '@/lib/config';
 
 export async function POST(request: NextRequest) {
   try {
@@ -31,7 +32,9 @@ export async function POST(request: NextRequest) {
       bathrooms,
       squareFeet,
       mlsNumber,
-      propertyFeatures
+      propertyFeatures,
+      modelProvider,
+      modelName,
     } = body;
 
     // For real estate videos, use property address as topic if topic is empty
@@ -42,7 +45,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Ensure project exists via FastAPI project save endpoint (keeps logic in backend)
-    const apiBase = process.env.NEXT_PUBLIC_API_BASE || 'http://127.0.0.1:8000';
+    const apiBase = API_BASE;
     let projectId = body.projectId;
     const saveResp = await fetch(`${apiBase}/api/projects/save`, {
       method: 'POST',
@@ -71,7 +74,9 @@ export async function POST(request: NextRequest) {
         bathrooms,
         square_feet: squareFeet,
         mls_number: mlsNumber,
-        property_features: propertyFeatures
+        property_features: propertyFeatures,
+        model_provider: modelProvider,
+        model_name: modelName,
       })
     });
 
@@ -125,17 +130,6 @@ export async function POST(request: NextRequest) {
     }
 
     const { content, script_id } = await fastApiResponse.json();
-
-    // Update project current_step to 'script' after successful generation
-    const { error: updateStepError } = await supabase
-      .from('projects')
-      .update({ current_step: 'script' })
-      .eq('id', projectId)
-      .eq('user_id', user.id);
-
-    if (updateStepError) {
-      console.error('Failed to update project current_step:', updateStepError);
-    }
 
     return NextResponse.json({
       script: content,

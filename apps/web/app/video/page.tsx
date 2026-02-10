@@ -1,7 +1,15 @@
 'use client';
-import React from 'react';
-import { useSearchParams, useRouter } from 'next/navigation';
+import React, { Suspense } from 'react';
+import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
+
+const getErrorMessage = (error: unknown, fallback: string) => {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return fallback;
+};
 
 // Video player component that handles both data URLs and file URLs
 function VideoPlayer({ 
@@ -24,7 +32,6 @@ function VideoPlayer({
     if (videoDataUrl.startsWith('http://') || 
         videoDataUrl.startsWith('https://') || 
         videoDataUrl.startsWith('/')) {
-      console.log('[VIDEO] Using direct URL:', videoDataUrl);
       setBlobUrl(videoDataUrl);
       return;
     }
@@ -32,9 +39,6 @@ function VideoPlayer({
     // Convert data URL to blob URL for better browser performance
     const convertToBlob = async () => {
       try {
-        console.log('[VIDEO] Converting data URL to blob URL...');
-        console.log('[VIDEO] Data URL length:', videoDataUrl.length);
-        console.log('[VIDEO] Data URL preview:', videoDataUrl.substring(0, 100) + '...');
         
         // Extract base64 data from data URL
         const base64Match = videoDataUrl.match(/^data:video\/mp4;base64,(.+)$/);
@@ -43,8 +47,6 @@ function VideoPlayer({
         }
 
         const base64Data = base64Match[1];
-        console.log('[VIDEO] Base64 data length:', base64Data.length);
-        console.log('[VIDEO] Base64 preview (first 100 chars):', base64Data.substring(0, 100));
 
         // Validate base64 string
         if (base64Data.length === 0) {
@@ -53,14 +55,12 @@ function VideoPlayer({
 
         // Check if base64 is valid (basic check)
         try {
-          const testDecode = atob(base64Data.substring(0, Math.min(100, base64Data.length)));
-          console.log('[VIDEO] Base64 validation passed');
+          atob(base64Data.substring(0, Math.min(100, base64Data.length)));
         } catch (e) {
           throw new Error(`Invalid base64 data: ${e}`);
         }
 
         // Convert base64 to binary in chunks to avoid memory issues
-        console.log('[VIDEO] Converting base64 to binary...');
         const binaryString = atob(base64Data);
         const bytes = new Uint8Array(binaryString.length);
         for (let i = 0; i < binaryString.length; i++) {
@@ -76,9 +76,6 @@ function VideoPlayer({
         const boxSize = (bytes[0] << 24) | (bytes[1] << 16) | (bytes[2] << 8) | bytes[3];
         const boxType = String.fromCharCode(bytes[4], bytes[5], bytes[6], bytes[7]);
         
-        console.log('[VIDEO] First box size:', boxSize);
-        console.log('[VIDEO] First box type:', boxType);
-        console.log('[VIDEO] File signature (hex):', Array.from(bytes.slice(0, 20)).map(b => b.toString(16).padStart(2, '0')).join(' '));
         
         // Validate MP4 structure
         if (boxType !== 'ftyp' && bytes.length > 20) {
@@ -87,26 +84,22 @@ function VideoPlayer({
             bytes[i] === 0x66 && bytes[i+1] === 0x74 && bytes[i+2] === 0x79 && bytes[i+3] === 0x70
           );
           if (ftypIndex === -1 || ftypIndex > 20) {
-            console.error('[VIDEO] ❌ Invalid MP4: ftyp box not found in first 100 bytes');
+            console.error('[VIDEO] Invalid MP4: ftyp box not found in first 100 bytes');
             throw new Error('Video file does not appear to be a valid MP4 format. File may be corrupted.');
           } else {
-            console.warn('[VIDEO] ⚠️  Warning: ftyp box found at offset', ftypIndex, '- faststart may not have been applied');
+            console.warn('[VIDEO] Warning: ftyp box found at offset', ftypIndex, '- faststart may not have been applied');
           }
         } else if (boxType === 'ftyp') {
-          console.log('[VIDEO] ✅ Valid MP4 file detected (ftyp box at offset 4)');
         }
         
         // Check file size matches first box size (basic validation)
         if (boxSize > bytes.length && boxSize < 1000000) {
-          console.warn('[VIDEO] ⚠️  Warning: First box size', boxSize, 'exceeds file size', bytes.length);
+          console.warn('[VIDEO] Warning: First box size', boxSize, 'exceeds file size', bytes.length);
         }
 
         // Create blob and blob URL
-        console.log('[VIDEO] Creating blob...');
         const blob = new Blob([bytes], { type: 'video/mp4' });
         const url = URL.createObjectURL(blob);
-        console.log('[VIDEO] Blob URL created:', url);
-        console.log('[VIDEO] Blob size:', blob.size, 'bytes (', (blob.size / 1024 / 1024).toFixed(2), 'MB)');
         
         setBlobUrl(url);
 
@@ -116,10 +109,12 @@ function VideoPlayer({
             URL.revokeObjectURL(url);
           }
         };
-      } catch (e: any) {
+      } catch (e: unknown) {
         console.error('[VIDEO] Error converting to blob URL:', e);
-        console.error('[VIDEO] Error stack:', e.stack);
-        setError(e?.message || 'Failed to load video');
+        if (e instanceof Error) {
+          console.error('[VIDEO] Error stack:', e.stack);
+        }
+        setError(getErrorMessage(e, 'Failed to load video'));
         // Fallback to data URL if blob conversion fails
         setBlobUrl(videoDataUrl);
       }
@@ -139,13 +134,10 @@ function VideoPlayer({
           console.error('[VIDEO] Blob fetch failed:', res.status, res.statusText);
           setError('Video blob is not accessible');
         } else {
-          console.log('[VIDEO] Blob fetch successful');
         }
         return res.blob();
       })
       .then(blob => {
-        console.log('[VIDEO] Blob type:', blob.type);
-        console.log('[VIDEO] Blob size:', blob.size, 'bytes');
         if (blob.size === 0) {
           setError('Video file appears to be empty');
         }
@@ -171,7 +163,7 @@ function VideoPlayer({
       <div className="bg-red-50 border border-red-200 rounded-lg p-4">
         <p className="text-red-700 text-sm font-semibold mb-2">Error loading video: {error}</p>
         <p className="text-red-600 text-xs mb-3">
-          This video may have been compiled with older settings that aren't compatible with your browser.
+          This video may have been compiled with older settings that aren&apos;t compatible with your browser.
           Try compiling a new video with the updated settings.
         </p>
         <p className="text-red-600 text-xs mb-4">Trying fallback method...</p>
@@ -191,7 +183,6 @@ function VideoPlayer({
             setError(`Video failed to load. Error: ${error?.message || 'Unknown error'}. The video file may be corrupted or in an unsupported format. Please try compiling a new video.`);
           }}
           onLoadedMetadata={() => {
-            console.log('[VIDEO] Fallback video metadata loaded');
             setError(null); // Clear error if fallback works
           }}
         >
@@ -203,7 +194,7 @@ function VideoPlayer({
               onClick={onRecompile}
               className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors inline-flex items-center space-x-2"
             >
-              <span>🔄</span>
+              <span>Rebuild</span>
               <span>Recompile Video with New Settings</span>
             </button>
           )}
@@ -213,7 +204,7 @@ function VideoPlayer({
               download={`video-${projectId || 'download'}.mp4`}
               className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors inline-flex items-center space-x-2"
             >
-              <span>⬇️</span>
+              <span>Download</span>
               <span>Try Downloading Video Instead</span>
             </a>
           )}
@@ -262,25 +253,14 @@ function VideoPlayer({
               setError(errorMsg);
             }}
             onLoadedMetadata={() => {
-              console.log('[VIDEO] Video metadata loaded successfully');
               const video = videoRef.current;
               if (video) {
-                console.log('[VIDEO] Video duration:', video.duration, 'seconds');
-                console.log('[VIDEO] Video seekable:', video.seekable.length > 0 ? `${video.seekable.start(0)} - ${video.seekable.end(0)}` : 'No seekable range');
               }
             }}
             onCanPlay={() => {
-              console.log('[VIDEO] Video can play');
             }}
             onLoadedData={() => {
-              console.log('[VIDEO] Video data loaded - seeking should now work');
-              const video = videoRef.current;
-              if (video) {
-                console.log('[VIDEO] Seekable ranges:', Array.from({ length: video.seekable.length }, (_, i) => ({
-                  start: video.seekable.start(i),
-                  end: video.seekable.end(i)
-                })));
-              }
+              // Intentionally left minimal: metadata and buffering handlers maintain playback stability.
             }}
             onProgress={() => {
               // Enable seeking as video buffers
@@ -292,7 +272,6 @@ function VideoPlayer({
                   const bufferedPercent = (bufferedEnd / duration) * 100;
                   if (bufferedPercent > 10) {
                     // Once 10% is buffered, seeking should work
-                    console.log(`[VIDEO] Buffered: ${bufferedPercent.toFixed(1)}%`);
                   }
                 }
               }
@@ -315,7 +294,7 @@ function VideoPlayer({
           disabled={!blobUrl}
           className="bg-green-600 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed text-white px-6 py-3 rounded-lg font-semibold transition-colors inline-flex items-center space-x-2"
         >
-          <span>⬇️</span>
+          <span>Download</span>
           <span>Download Video</span>
         </button>
       </div>
@@ -333,9 +312,29 @@ type Video = {
 };
 
 export default function VideoPage() {
+  return (
+    <Suspense
+      fallback={(
+        <main className="min-h-screen bg-slate-50">
+          <div className="container mx-auto px-4 py-8">
+            <div className="max-w-6xl mx-auto">
+              <div className="bg-white rounded-lg border border-slate-200 p-8 text-center">
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+                <p className="mt-4 text-slate-600">Loading video...</p>
+              </div>
+            </div>
+          </div>
+        </main>
+      )}
+    >
+      <VideoPageContent />
+    </Suspense>
+  );
+}
+
+function VideoPageContent() {
   const searchParams = useSearchParams();
-  const router = useRouter();
-  const supabase = createClient();
+  const supabase = React.useMemo(() => createClient(), []);
   const [projectId, setProjectId] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState<boolean>(true);
   const [error, setError] = React.useState<string | null>(null);
@@ -420,22 +419,20 @@ export default function VideoPage() {
                 ...videoData.video,
                 video_data_url: videoUrl
               });
-              console.log('[VIDEO] Loaded existing video:', videoUrl);
             } else {
-              console.log('[VIDEO] Video exists but no URL found');
             }
           }
         }
 
         setLoading(false);
-      } catch (e: any) {
+      } catch (e: unknown) {
         console.error('Error loading video page:', e);
-        setError(e?.message || 'Failed to load page');
+        setError(getErrorMessage(e, 'Failed to load page'));
         setLoading(false);
       }
     }
     load();
-  }, [searchParams]);
+  }, [searchParams, supabase]);
 
   const onCompile = async () => {
     try {
@@ -448,10 +445,6 @@ export default function VideoPage() {
         return;
       }
 
-      console.log('[VIDEO] Starting compilation request...');
-      console.log('[VIDEO] Project ID:', projectId);
-      console.log('[VIDEO] Has session:', !!session);
-      console.log('[VIDEO] Token length:', session.access_token?.length || 0);
 
       // Video compilation can take a while, so set a longer timeout
       const controller = new AbortController();
@@ -483,9 +476,7 @@ export default function VideoPage() {
       
       clearTimeout(timeoutId);
 
-      console.log('[VIDEO] Response status:', resp.status);
       const responseText = await resp.text();
-      console.log('[VIDEO] Response text length:', responseText.length);
       
       if (!resp.ok) {
         let errorMsg = responseText;
@@ -498,7 +489,6 @@ export default function VideoPage() {
 
       const data = JSON.parse(responseText);
       if (data.success && data.video_id) {
-        console.log('[VIDEO] Compilation successful, fetching video data...');
         // Fetch the video data separately since it's too large to return in compile response
         const videoFetchRes = await fetch(`/api/video/project/${projectId}`, {
           headers: { Authorization: `Bearer ${session.access_token}` },
@@ -527,7 +517,6 @@ export default function VideoPage() {
               video_url: videoData.video.video_url,
               status: 'completed',
             });
-            console.log('[VIDEO] Video URL loaded successfully:', videoUrl);
           } else {
             throw new Error('Video compiled but video URL not found');
           }
@@ -537,9 +526,9 @@ export default function VideoPage() {
       } else {
         throw new Error('Video compilation failed');
       }
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.error('[VIDEO] Error compiling video:', e);
-      setError(e?.message || 'Failed to compile video. Check the browser console for details.');
+      setError(getErrorMessage(e, 'Failed to compile video. Check the browser console for details.'));
     } finally {
       setCompiling(false);
     }
@@ -551,19 +540,19 @@ export default function VideoPage() {
       <main className="min-h-screen bg-slate-50">
         <div className="container mx-auto px-4 py-8">
           <div className="max-w-6xl mx-auto">
-            <h1 className="text-3xl font-bold text-slate-900 mb-6">🎬 Video Compilation</h1>
+            <h1 className="text-3xl font-bold text-slate-900 mb-6">Video Compilation</h1>
             <div className="bg-white rounded-lg border border-slate-200 p-8 text-center">
-              <div className="text-5xl mb-4">🎥</div>
+              <div className="text-5xl mb-4">Video</div>
               <h2 className="text-xl font-semibold text-slate-900 mb-2">No Project Selected</h2>
               <p className="text-slate-600 mb-6">
                 To compile a video, please continue from the images page.
               </p>
-              <a
+              <Link
                 href="/"
                 className="inline-block bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg font-semibold transition-colors"
               >
                 Go to Home
-              </a>
+              </Link>
             </div>
           </div>
         </div>
@@ -575,7 +564,7 @@ export default function VideoPage() {
     <main className="min-h-screen bg-slate-50">
       <div className="container mx-auto px-4 py-8">
         <div className="max-w-6xl mx-auto">
-          <h1 className="text-3xl font-bold text-slate-900 mb-6">🎬 Video Compilation</h1>
+          <h1 className="text-3xl font-bold text-slate-900 mb-6">Video Compilation</h1>
 
           {error && (
             <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
@@ -640,7 +629,7 @@ export default function VideoPage() {
                       disabled={compiling || !hasScript || !hasVoiceover || !hasImages}
                       className="bg-purple-600 hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors inline-flex items-center space-x-2"
                     >
-                      <span>🔄</span>
+                      <span>Rebuild</span>
                       <span>{compiling ? 'Recompiling...' : 'Recompile Video'}</span>
                     </button>
                   </div>
@@ -658,4 +647,3 @@ export default function VideoPage() {
     </main>
   );
 }
-

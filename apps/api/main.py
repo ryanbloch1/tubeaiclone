@@ -1,7 +1,9 @@
 import base64
 import io
 import os
+import sys
 import time
+from pathlib import Path
 
 try:
     # Load environment variables from a .env file
@@ -42,22 +44,26 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include routers for new Supabase-integrated endpoints
+# Ensure local package path is on sys.path so absolute module imports work
+_API_ROOT = Path(__file__).resolve().parent
+if str(_API_ROOT) not in sys.path:
+    sys.path.insert(0, str(_API_ROOT))
+
+# Include routers for Supabase-integrated endpoints (fail fast if missing)
 try:
     from routes.script import router as script_router
     from routes.voiceover import router as voiceover_router
     from routes.images import router as images_router
     from routes.video import router as video_router
     from routes.projects import router as projects_router
+except Exception as e:  # Fail fast with context
+    raise RuntimeError(f"Failed to import API routers: {e}") from e
 
-    app.include_router(script_router)
-    app.include_router(voiceover_router, prefix="/api/voiceover")
-    app.include_router(images_router, prefix="/api/images")
-    app.include_router(video_router, prefix="/api/video")
-    app.include_router(projects_router)
-    print("✅ Loaded Supabase-integrated routes")
-except ImportError as e:
-    print(f"⚠️  Supabase routes not available: {e}")
+app.include_router(script_router)
+app.include_router(voiceover_router, prefix="/api/voiceover")
+app.include_router(images_router, prefix="/api/images")
+app.include_router(video_router, prefix="/api/video")
+app.include_router(projects_router)
 
 
 class ImageRequest(BaseModel):

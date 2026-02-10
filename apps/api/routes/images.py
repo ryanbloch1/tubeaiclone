@@ -562,7 +562,7 @@ async def generate_images(req: ImageGenerateRequest, user_id: str = Depends(veri
                 transformed_img = {
                     'id':       inserted_img['id'],
                     'scene_id': inserted_img.get('scene_id'),
-                    'image_data': inserted_img.get('image_data'),
+                    'image_data_url': inserted_img.get('image_data'),
                     'prompt':      display_text or image_prompt,  # clean narration or prompt
                     'styled_prompt': styled_prompt,
                     'scene_number':  scene_num_found,
@@ -571,6 +571,9 @@ async def generate_images(req: ImageGenerateRequest, user_id: str = Depends(veri
                     'created_at':    inserted_img.get('created_at'),
                 }
                 transformed_images.append(transformed_img)
+                yield f"data: {json.dumps({'type': 'image', 'image': transformed_img})}\n\n"
+
+            yield f"data: {json.dumps({'type': 'complete', 'count': len(transformed_images), 'images': transformed_images})}\n\n"
         
         return StreamingResponse(
             generate_and_stream(),
@@ -1177,4 +1180,3 @@ async def reorder_project_photos(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to reorder project photos: {e}")
-

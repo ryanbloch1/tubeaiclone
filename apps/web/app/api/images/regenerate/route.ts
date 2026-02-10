@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { API_BASE } from '@/lib/config';
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const auth = req.headers.get('authorization') || '';
-    const resp = await fetch('http://127.0.0.1:8000/api/images/regenerate', {
+    const resp = await fetch(`${API_BASE}/api/images/regenerate`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -13,11 +14,11 @@ export async function POST(req: NextRequest) {
       body: JSON.stringify(body),
     });
     const text = await resp.text();
-    let data: any;
+    let data: unknown;
     try { data = JSON.parse(text); } catch { data = { raw: text }; }
     return NextResponse.json(data, { status: resp.status });
-  } catch (e: any) {
-    return NextResponse.json({ error: e?.message || 'Failed to regenerate image' }, { status: 500 });
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : 'Failed to regenerate image';
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
-

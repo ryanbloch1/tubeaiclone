@@ -27,10 +27,10 @@ const variantStyles = {
 };
 
 const variantIcons = {
-  success: '✅',
-  error: '❌',
-  info: 'ℹ️',
-  warning: '⚠️',
+  success: 'OK',
+  error: 'ERR',
+  info: 'INFO',
+  warning: 'WARN',
 };
 
 export function ToastComponent({ toast, onRemove }: ToastProps) {

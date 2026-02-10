@@ -26,8 +26,23 @@ SUPABASE_ANON_KEY=your-anon-key-here
 # Optional: Service role key for admin operations (keep secret!)
 SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 
-# Other API keys
-GEMINI_API_KEY=your-gemini-key
+# Script generation providers (set at least one)
+GROQ_API_KEY=your-groq-api-key
+GROQ_MODEL=llama-3.1-8b-instant
+
+GEMINI_API_KEY=your-gemini-api-key
+GOOGLE_API_KEY=your-google-api-key
+GEMINI_MODEL=gemini-1.5-flash
+
+OPENAI_API_KEY=your-openai-api-key
+OPENAI_MODEL=gpt-4o-mini
+# Optional for OpenAI-compatible backends
+OPENAI_BASE_URL=https://api.openai.com/v1
+
+ANTHROPIC_API_KEY=your-anthropic-api-key
+ANTHROPIC_MODEL=claude-3-5-haiku-latest
+
+# Other optional settings
 IMAGE_SD_MODEL=stabilityai/stable-diffusion-2-1-base
 ```
 

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import { API_BASE } from '@/lib/config';
 
 export async function GET(request: NextRequest) {
   try {
@@ -16,8 +17,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const apiBase = process.env.NEXT_PUBLIC_API_BASE || 'http://127.0.0.1:8000';
-    const resp = await fetch(`${apiBase}/api/projects/${projectId}/photos-status`, {
+    const resp = await fetch(`${API_BASE}/api/projects/${projectId}/photos-status`, {
       headers: {
         'Authorization': `Bearer ${(await supabase.auth.getSession()).data.session?.access_token}`,
       },
@@ -25,7 +25,7 @@ export async function GET(request: NextRequest) {
     });
 
     const text = await resp.text();
-    let data: any;
+    let data: unknown;
     try {
       data = JSON.parse(text);
     } catch {
@@ -41,5 +41,3 @@ export async function GET(request: NextRequest) {
     );
   }
 }
-
-

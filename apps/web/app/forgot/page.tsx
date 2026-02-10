@@ -1,3 +1,8 @@
+'use client';
+
+import { useState } from 'react';
+import { createClient } from '@/lib/supabase/client';
+
 export default function ForgotPasswordPage() {
   return (
     <div className="min-h-screen bg-slate-50 flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
@@ -16,10 +21,6 @@ export default function ForgotPasswordPage() {
   );
 }
 
-'use client';
-import { useState } from 'react';
-import { createClient } from '@/lib/supabase/server';
-
 function ForgotForm() {
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
@@ -32,7 +33,7 @@ function ForgotForm() {
     setMessage(null);
     setError(null);
     try {
-      const supabase = await createClient();
+      const supabase = createClient();
       const { error } = await supabase.auth.resetPasswordForEmail(email, {
         redirectTo: `${window.location.origin}/reset-password`,
       });
@@ -41,7 +42,7 @@ function ForgotForm() {
       } else {
         setMessage('Check your email for a reset link.');
       }
-    } catch (err) {
+    } catch { 
       setError('Failed to send reset email');
     } finally {
       setLoading(false);

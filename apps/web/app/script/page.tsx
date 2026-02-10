@@ -7,22 +7,32 @@ import { AuthGuard } from '@/components/auth/AuthGuard';
 import { ContextModal } from "./ui/ContextModal";
 import { StyleModal } from "./ui/StyleModal";
 
-const STYLE_PRESETS = [
-  { value: 'Professional Real Estate', label: '🏠 Professional Real Estate' },
-  { value: 'Luxury Property', label: '✨ Luxury Property' },
-  { value: 'Photorealistic', label: '📸 Photorealistic Cinematic' },
-  { value: 'Comic Book', label: '🎨 Comic Book Illustration' },
-  { value: 'Studio Ghibli', label: '🎬 Studio Ghibli Animation' },
-  { value: 'Cyberpunk Neon', label: '🌃 Cyberpunk Neon' },
-  { value: 'Watercolor Storybook', label: '🖌️ Watercolor Storybook' },
-];
-
 type ScriptResponse = { 
   script?: string; 
   scriptId?: string;
   projectId?: string;
   error?: string; 
   mock?: boolean 
+};
+
+const MODEL_OPTIONS = [
+  { value: 'auto', label: 'Auto (best available)' },
+  { value: 'groq:llama-3.1-8b-instant', label: 'Groq - Llama 3.1 8B Instant' },
+  { value: 'groq:llama-3.3-70b-versatile', label: 'Groq - Llama 3.3 70B Versatile' },
+  { value: 'gemini:gemini-1.5-flash', label: 'Google - Gemini 1.5 Flash' },
+  { value: 'openai:gpt-4o-mini', label: 'OpenAI - GPT-4o Mini' },
+  { value: 'anthropic:claude-3-5-haiku-latest', label: 'Anthropic - Claude 3.5 Haiku' },
+];
+
+const parseModelSelection = (selection: string): { modelProvider?: string; modelName?: string } => {
+  if (selection === 'auto') {
+    return {};
+  }
+  const [modelProvider, modelName] = selection.split(':', 2);
+  if (!modelProvider || !modelName) {
+    return {};
+  }
+  return { modelProvider, modelName };
 };
 
 type Project = {
@@ -80,6 +90,7 @@ function ScriptPageContent() {
   const [extraContext, setExtraContext] = useState('');
   const [imageCount, setImageCount] = useState(10);
   const [videoLength, setVideoLength] = useState('1:00');
+  const [scriptModel, setScriptModel] = useState('auto');
   const [editableScript, setEditableScript] = useState('');
   
   // Real estate form state
@@ -109,7 +120,6 @@ function ScriptPageContent() {
   const [result, setResult] = useState<ScriptResponse | null>(null);
   const [projectId, setProjectId] = useState<string | null>(null);
   const [photoStatus, setPhotoStatus] = useState<{ uploaded: number; analysed: number; minRequired: number } | null>(null);
-  const [savingProject, setSavingProject] = useState(false);
   const [uploadingPhotos, setUploadingPhotos] = useState(false);
   const [projectPhotos, setProjectPhotos] = useState<ProjectPhoto[]>([]);
   const [dragPhotoId, setDragPhotoId] = useState<string | null>(null);
@@ -249,15 +259,13 @@ function ScriptPageContent() {
         return;
       }
       const data = await resp.json();
-      console.log('[LOAD_PHOTOS] Received data:', { success: data.success, photoCount: data.photos?.length, photos: data.photos });
       if (data && data.success && Array.isArray(data.photos)) {
-        const mapped = data.photos.map((p: any) => ({
+        const mapped = data.photos.map((p: ProjectPhoto) => ({
           id: p.id,
           image_data_url: p.image_data_url ?? null,
           analysed: !!p.analysed,
           sort_index: p.sort_index ?? null,
         }));
-        console.log('[LOAD_PHOTOS] Mapped photos:', mapped.length, mapped);
         setProjectPhotos(mapped);
       } else {
         console.warn('[LOAD_PHOTOS] Invalid response format:', data);
@@ -325,7 +333,6 @@ function ScriptPageContent() {
     // Auto-save project if we don't have a projectId yet
     let currentProjectId = projectId;
     if (!currentProjectId) {
-      setSavingProject(true);
       try {
         const resp = await fetch('/api/projects/save', {
           method: 'POST',
@@ -365,15 +372,13 @@ function ScriptPageContent() {
       } catch (e) {
         console.error('Failed to save project', e);
         setError(e instanceof Error ? e.message : 'Failed to save project');
-        setSavingProject(false);
         setLoading(false);
         return;
-      } finally {
-        setSavingProject(false);
       }
     }
     
     try {
+      const { modelProvider, modelName } = parseModelSelection(scriptModel);
       const response = await fetch("/api/script/generate", {
         method: "POST",
         headers: { 
@@ -400,7 +405,9 @@ function ScriptPageContent() {
           bathrooms: bathrooms || undefined,
           squareFeet: squareFeet || undefined,
           mlsNumber: mlsNumber || undefined,
-          propertyFeatures
+          propertyFeatures,
+          modelProvider,
+          modelName,
         }),
       });
 
@@ -435,56 +442,6 @@ function ScriptPageContent() {
     }
   }, [videoLength, imageCount]);
 
-  // Save project (without generating script) so we can upload photos
-  const saveProjectForPhotos = async () => {
-    if (savingProject) return;
-    setSavingProject(true);
-    setError(null);
-    try {
-      const resp = await fetch('/api/projects/save', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          projectId,
-          topic: topic || propertyAddress || 'Property Listing',
-          style,
-          mode,
-          temperature,
-          wordCount,
-          imageCount,
-          videoLength,
-          selection,
-          extraContext,
-          videoType,
-          propertyAddress,
-          propertyType: propertyType || 'other',
-          propertyPrice: propertyPrice || undefined,
-          bedrooms: bedrooms || undefined,
-          bathrooms: bathrooms || undefined,
-          squareFeet: squareFeet || undefined,
-          mlsNumber: mlsNumber || undefined,
-          propertyFeatures,
-        }),
-      });
-      const data = await resp.json();
-      if (!resp.ok) {
-        throw new Error(data.error || `HTTP ${resp.status}`);
-      }
-      if (data.projectId) {
-        setProjectId(data.projectId);
-        await refreshPhotoStatus(data.projectId);
-        await loadProjectPhotos(data.projectId);
-      }
-    } catch (e) {
-      console.error('Failed to save project', e);
-      setError(e instanceof Error ? e.message : 'Failed to save project');
-    } finally {
-      setSavingProject(false);
-    }
-  };
-
   // Helper to ensure we have a project ID (creates one if needed)
   const ensureProjectId = async (): Promise<string | null> => {
     if (projectId) return projectId;
@@ -495,7 +452,6 @@ function ScriptPageContent() {
       return null;
     }
     
-    setSavingProject(true);
     try {
       const resp = await fetch('/api/projects/save', {
         method: 'POST',
@@ -548,8 +504,6 @@ function ScriptPageContent() {
       console.error('Failed to create project', e);
       setError(e instanceof Error ? e.message : 'Failed to create project');
       return null;
-    } finally {
-      setSavingProject(false);
     }
   };
 
@@ -667,7 +621,7 @@ function ScriptPageContent() {
         <div className="max-w-5xl mx-auto">
           <div className="text-center mb-8">
             <h1 className="text-4xl font-bold text-slate-900 mb-2">Create Property Listing Video</h1>
-            <p className="text-slate-600">Enter property details and we'll generate a professional script automatically</p>
+            <p className="text-slate-600">Enter property details and we&apos;ll generate a professional script automatically</p>
           </div>
           
           <form onSubmit={onSubmit} className="space-y-6">
@@ -690,9 +644,9 @@ function ScriptPageContent() {
                   className="w-full rounded-lg border-2 border-slate-300 px-4 py-3 text-base bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-200 font-medium"
                   required
                 >
-                  <option value="listing">🏠 Property Listing</option>
-                  <option value="neighborhood_guide">📍 Neighborhood Guide</option>
-                  <option value="market_update">📊 Market Update</option>
+                  <option value="listing">Property Listing</option>
+                  <option value="neighborhood_guide">Neighborhood Guide</option>
+                  <option value="market_update">Market Update</option>
                 </select>
               </div>
               
@@ -908,10 +862,10 @@ function ScriptPageContent() {
                   </div>
                   
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label htmlFor="video-length" className="block text-sm font-semibold text-slate-700 mb-2">
-                        Video Length
-                      </label>
+                  <div>
+                    <label htmlFor="video-length" className="block text-sm font-semibold text-slate-700 mb-2">
+                      Video Length
+                    </label>
                       <select
                         id="video-length"
                         value={videoLength}
@@ -925,7 +879,23 @@ function ScriptPageContent() {
                       </select>
                     </div>
                     
-                    <div />
+                    <div>
+                      <label htmlFor="script-model" className="block text-sm font-semibold text-slate-700 mb-2">
+                        Script Model
+                      </label>
+                      <select
+                        id="script-model"
+                        value={scriptModel}
+                        onChange={(e) => setScriptModel(e.target.value)}
+                        className="w-full rounded-lg border-2 border-slate-300 px-4 py-3 text-base bg-white text-black focus:border-blue-500 focus:ring-2 focus:ring-blue-200"
+                      >
+                        {MODEL_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
                 </div>
               )}
@@ -943,7 +913,7 @@ function ScriptPageContent() {
                 <div className="mt-2 space-y-3">
                   <label className="block">
                     <div className="flex flex-col items-center justify-center border-2 border-dashed border-slate-300 rounded-xl py-6 px-4 cursor-pointer hover:border-slate-400 transition-colors bg-slate-50">
-                      <div className="text-2xl mb-2">📤</div>
+                      <div className="text-2xl mb-2">Upload</div>
                       <div className="text-sm font-medium text-slate-900">
                         {uploadingPhotos ? 'Uploading photos…' : 'Click or drag images here to upload'}
                       </div>
@@ -957,7 +927,7 @@ function ScriptPageContent() {
                       multiple
                       className="hidden"
                       onChange={(e) => handleUploadPhotos(e.target.files)}
-                      disabled={uploadingPhotos || savingProject}
+                      disabled={uploadingPhotos}
                     />
                   </label>
                   {photoStatus && (
@@ -1035,7 +1005,9 @@ function ScriptPageContent() {
                     loading ||
                     (!propertyAddress && !topic.trim()) ||
                     // If any photos uploaded, require min analysed before enabling
-                    (photoStatus && photoStatus.uploaded > 0 && photoStatus.analysed < photoStatus.minRequired)
+                    (photoStatus
+                      ? photoStatus.uploaded > 0 && photoStatus.analysed < photoStatus.minRequired
+                      : false)
                   }
                   className="bg-white text-blue-600 hover:bg-blue-50 disabled:opacity-50 disabled:cursor-not-allowed px-8 py-4 rounded-lg font-bold text-lg transition-all transform hover:scale-105 shadow-lg whitespace-nowrap"
                 >
@@ -1046,7 +1018,7 @@ function ScriptPageContent() {
                     </span>
                   ) : (
                     <span className="flex items-center gap-2">
-                      ✨ Generate Professional Script
+                      Generate Professional Script
                     </span>
                   )}
                 </button>
@@ -1067,7 +1039,7 @@ function ScriptPageContent() {
           <div className="max-w-5xl mx-auto mt-8 space-y-6">
             {result.mock && (
               <div className="bg-amber-50 border-2 border-amber-300 rounded-xl p-4">
-                <p className="text-amber-800 text-sm font-medium">⚠️ Mock fallback (no API key detected)</p>
+                <p className="text-amber-800 text-sm font-medium">Mock fallback (no API key detected)</p>
               </div>
             )}
             
@@ -1075,7 +1047,7 @@ function ScriptPageContent() {
             {(propertyAddress || propertyType || propertyPrice || bedrooms || bathrooms) && (
               <div className="bg-gradient-to-r from-blue-50 via-green-50 to-blue-50 rounded-xl border-2 border-blue-300 p-6 shadow-md">
                 <div className="flex items-center gap-2 mb-4">
-                  <span className="text-2xl">🏠</span>
+                  <span className="text-2xl">Property</span>
                   <h3 className="text-lg font-bold text-slate-900">Property Summary</h3>
                 </div>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">

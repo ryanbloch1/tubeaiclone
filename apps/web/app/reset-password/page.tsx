@@ -1,3 +1,9 @@
+'use client';
+
+import { useState, useEffect } from 'react';
+import { createClient } from '@/lib/supabase/client';
+import { useRouter } from 'next/navigation';
+
 export default function ResetPasswordPage() {
   return (
     <div className="min-h-screen bg-slate-50 flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
@@ -15,11 +21,6 @@ export default function ResetPasswordPage() {
     </div>
   );
 }
-
-'use client';
-import { useState, useEffect } from 'react';
-import { createClient } from '@/lib/supabase/server';
-import { useRouter } from 'next/navigation';
 
 function ResetForm() {
   const router = useRouter();
@@ -52,7 +53,7 @@ function ResetForm() {
     }
 
     try {
-      const supabase = await createClient();
+      const supabase = createClient();
       const { error } = await supabase.auth.updateUser({ password });
       if (error) {
         setError(error.message || 'Failed to update password');
@@ -60,7 +61,7 @@ function ResetForm() {
         setMessage('Password updated. Redirecting to login...');
         setTimeout(() => router.push('/login'), 1500);
       }
-    } catch (err) {
+    } catch { 
       setError('Failed to update password');
     } finally {
       setLoading(false);

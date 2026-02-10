@@ -1,11 +1,12 @@
 import type { NextRequest } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import { API_BASE } from '@/lib/config';
 
 export const runtime = 'nodejs';
 
 export async function POST(request: NextRequest) {
   try {
-    const { script, filename, voice_id, model_id, format, project_id, script_id }: { script?: string; filename?: string; voice_id?: string; model_id?: string; format?: 'wav' | 'mp3'; project_id?: string; script_id?: string } = await request.json();
+    const { script, voice_id, model_id, project_id, script_id }: { script?: string; voice_id?: string; model_id?: string; project_id?: string; script_id?: string } = await request.json();
     if (!script || !script.trim()) {
       return new Response(JSON.stringify({ error: 'script is required' }), {
         status: 400,
@@ -19,8 +20,7 @@ export async function POST(request: NextRequest) {
       return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
     }
 
-    const apiBase = process.env.NEXT_PUBLIC_API_BASE || 'http://127.0.0.1:8000';
-    const resp = await fetch(`${apiBase}/api/voiceover/generate`, {
+    const resp = await fetch(`${API_BASE}/api/voiceover/generate`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -53,7 +53,6 @@ export async function POST(request: NextRequest) {
     }
 
     const base64 = audioDataUrl.split(',')[1] || '';
-    const buf = Buffer.from(base64, 'base64');
     
     // Return both the audio blob and the metadata
     return new Response(JSON.stringify({

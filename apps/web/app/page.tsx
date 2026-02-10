@@ -4,13 +4,13 @@ import { useAuth } from '@/components/auth/AuthProvider';
 import Link from 'next/link';
 import { useEffect, useState, useCallback } from 'react';
 import { useToastContext } from '@/components/providers/ToastProvider';
-import { Trash2, ChevronDown, Loader2 } from 'lucide-react';
+import { Trash2, Loader2 } from 'lucide-react';
 
 type Project = {
   id: string;
   title: string;
   topic: string | null;
-  status: 'draft' | 'script' | 'voiceover' | 'images' | 'complete';
+  status: 'draft' | 'script' | 'voiceover' | 'images' | 'video' | 'complete';
   // Real estate fields
   video_type?: 'listing' | 'neighborhood_guide' | 'market_update';
   property_address?: string;
@@ -190,7 +190,7 @@ function RecentProjects() {
     setDeletingIds(prev => new Set(prev).add(project.id));
 
     // Show undo toast
-    const toastId = toast.success(
+    toast.success(
       `Project "${project.title}" deleted`,
       {
         onUndo: () => {
@@ -241,7 +241,7 @@ function RecentProjects() {
           newMap.delete(project.id);
           return newMap;
         });
-      } catch (e) {
+      } catch {
         // Restore project on error
         setProjects(prev => [...prev, project].sort((a, b) => 
           new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
@@ -262,23 +262,26 @@ function RecentProjects() {
     if (!project.status || project.status === 'draft' || project.status === 'script') return `/script?projectId=${project.id}`;
     if (project.status === 'voiceover') return `/voiceover?projectId=${project.id}`;
     if (project.status === 'images') return `/images?projectId=${project.id}`;
+    if (project.status === 'video') return `/video?projectId=${project.id}`;
     return `/script?projectId=${project.id}`;
   };
 
   const getStepBadge = (step: Project['status']) => {
     switch (step) {
       case 'draft':
-        return { text: '📝 Draft', color: 'bg-gray-50 text-gray-700 border-gray-200' };
+        return { text: 'Draft', color: 'bg-gray-50 text-gray-700 border-gray-200' };
       case 'script':
-        return { text: '📝 Script Ready', color: 'bg-blue-50 text-blue-700 border-blue-200' };
+        return { text: 'Script Ready', color: 'bg-blue-50 text-blue-700 border-blue-200' };
       case 'voiceover':
-        return { text: '🎙️ Voiceover Ready', color: 'bg-green-50 text-green-700 border-green-200' };
+        return { text: 'Voiceover Ready', color: 'bg-green-50 text-green-700 border-green-200' };
       case 'images':
-        return { text: '🎨 Images Ready', color: 'bg-purple-50 text-purple-700 border-purple-200' };
+        return { text: 'Images Ready', color: 'bg-purple-50 text-purple-700 border-purple-200' };
+      case 'video':
+        return { text: 'Video Ready', color: 'bg-indigo-50 text-indigo-700 border-indigo-200' };
       case 'complete':
-        return { text: '✅ Complete', color: 'bg-emerald-50 text-emerald-700 border-emerald-200' };
+        return { text: 'Complete', color: 'bg-emerald-50 text-emerald-700 border-emerald-200' };
       default:
-        return { text: '📝 Draft', color: 'bg-gray-50 text-gray-700 border-gray-200' };
+        return { text: 'Draft', color: 'bg-gray-50 text-gray-700 border-gray-200' };
     }
   };
 
@@ -359,7 +362,7 @@ function RecentProjects() {
         </div>
       ) : error ? (
         <div className="text-center py-12">
-          <div className="text-6xl mb-4">⚠️</div>
+          <div className="text-2xl mb-4 font-semibold text-amber-600">Notice</div>
           <h4 className="text-xl font-semibold text-slate-900 mb-2">Failed to load projects</h4>
           <p className="text-slate-600 mb-6">{error}</p>
           <button

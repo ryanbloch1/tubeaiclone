@@ -1074,8 +1074,7 @@ async def get_video_for_project(
         if video:
             if video.get('video_url'):
                 # New format: video stored on disk, URL points to file endpoint
-                video['video_data_url'] = f"http://127.0.0.1:8000{video['video_url']}"
-                print(f"[VIDEO] Video URL: {video['video_data_url']}")
+                video['video_data_url'] = video['video_url']
             else:
                 # Old format: try to get video_data from database (for backwards compatibility)
                 video_data_result = (
@@ -1120,4 +1119,3 @@ async def get_video_for_project(
         if isinstance(e, bytes):
             error_msg = e.decode('utf-8', errors='ignore')
         raise HTTPException(status_code=500, detail=f"Failed to fetch video: {error_msg}")
-

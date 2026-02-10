@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import { API_BASE } from '@/lib/config';
 
 export async function POST(request: NextRequest) {
   try {
@@ -40,7 +41,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Topic or property address is required' }, { status: 400 });
     }
 
-    const apiBase = process.env.NEXT_PUBLIC_API_BASE || 'http://127.0.0.1:8000';
+    const apiBase = API_BASE;
 
     const fastApiResponse = await fetch(`${apiBase}/api/projects/save`, {
       method: 'POST',
@@ -94,5 +95,4 @@ export async function POST(request: NextRequest) {
     );
   }
 }
-
 

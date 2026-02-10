@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import { API_BASE } from '@/lib/config';
 
 export async function POST(request: NextRequest) {
   try {
@@ -22,8 +23,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Call FastAPI upload endpoint
-    const apiBase = process.env.NEXT_PUBLIC_API_BASE || 'http://127.0.0.1:8000';
-    const resp = await fetch(`${apiBase}/api/images/upload`, {
+    const resp = await fetch(`${API_BASE}/api/images/upload`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -56,6 +56,5 @@ export async function POST(request: NextRequest) {
     );
   }
 }
-
 
 

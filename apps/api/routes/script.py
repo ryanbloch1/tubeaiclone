@@ -35,6 +35,8 @@ class ScriptGenerationRequest(BaseModel):
     square_feet: Optional[int] = Field(None)
     mls_number: Optional[str] = Field(None)
     property_features: Optional[list[str]] = Field(None)
+    model_provider: Optional[Literal['auto', 'groq', 'gemini', 'openai', 'anthropic']] = Field('auto')
+    model_name: Optional[str] = Field(None, description="Provider-specific model name override")
 
 
 class ScriptGenerationResponse(BaseModel):
@@ -52,11 +54,11 @@ async def generate_script(
     user_id: str = Depends(verify_token_async)
 ):
     """
-    Generate a script using Gemini AI and save to Supabase.
+    Generate a script using the selected AI provider and save to Supabase.
     
     Flow:
     1. Verify user owns the project
-    2. Generate script using Gemini
+    2. Generate script using selected provider/model
     3. Save to database
     4. Update project status
     5. Return script content and ID
@@ -129,7 +131,7 @@ async def generate_script(
     # For now, first script uses project-level photos in upload order (one scene per photo).
     # If no photos exist, photos list will be empty and the script falls back to non-photo template.
 
-    # 3. Generate script using Gemini (delegated to service)
+    # 3. Generate script using selected provider/model (delegated to service)
     try:
         from services.script_generation import generate_script_with_gemini
         
@@ -154,6 +156,8 @@ async def generate_script(
             square_feet=request.square_feet,
             mls_number=request.mls_number,
             property_features=request.property_features,
+            model_provider=request.model_provider,
+            model_name=request.model_name,
             photos=photos or None,
         )
         
@@ -264,17 +268,22 @@ async def update_script(
     """
     supabase = get_supabase()
     
-    # Verify user owns this script
+    # Verify user owns this script via project ownership
     try:
-        script_result = supabase.table('scripts') \
-            .select('*') \
-            .eq('id', script_id) \
-            .eq('user_id', user_id) \
-            .single() \
+        script_result = (
+            supabase.table("scripts")
+            .select("id, project_id, projects!inner(user_id)")
+            .eq("id", script_id)
+            .single()
             .execute()
+        )
         
         if not script_result.data:
             raise HTTPException(status_code=404, detail="Script not found")
+
+        project = script_result.data.get("projects") or {}
+        if project.get("user_id") != user_id:
+            raise HTTPException(status_code=403, detail="Access denied")
             
     except Exception as e:
         if "404" in str(e):
@@ -298,4 +307,3 @@ async def update_script(
             status_code=500,
             detail=f"Failed to update script: {str(e)}"
         )
-

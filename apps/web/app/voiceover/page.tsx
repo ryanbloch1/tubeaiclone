@@ -1,14 +1,36 @@
 'use client';
 import { generateVoiceoverSync } from '@/lib/api';
 import { sanitizeScriptForVoiceover } from '@/lib/sanitize';
-import React, { useMemo } from 'react';
+import React, { Suspense, useMemo } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
 
 export default function VoiceoverPage() {
+  return (
+    <Suspense
+      fallback={(
+        <main className="min-h-screen bg-slate-50">
+          <div className="container mx-auto px-4 py-8">
+            <div className="max-w-4xl mx-auto">
+              <div className="bg-white rounded-lg border border-slate-200 p-8 text-center">
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+                <p className="mt-4 text-slate-600">Loading voiceover...</p>
+              </div>
+            </div>
+          </div>
+        </main>
+      )}
+    >
+      <VoiceoverPageContent />
+    </Suspense>
+  );
+}
+
+function VoiceoverPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const supabase = createClient();
+  const supabase = React.useMemo(() => createClient(), []);
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [hasGeneratedVoiceover, setHasGeneratedVoiceover] = React.useState(false);
@@ -62,7 +84,6 @@ export default function VoiceoverPage() {
               setAudioDataUrl(latestVoiceover.audio_data_url);
               setHasGeneratedVoiceover(true);
               setAudioReady(false);
-              console.log('Loaded existing voiceover:', latestVoiceover.id);
             }
           }
         }
@@ -74,14 +95,11 @@ export default function VoiceoverPage() {
       }
     }
     load();
-  }, [searchParams]);
+  }, [searchParams, supabase]);
 
   // Note: Do NOT prefill editedScript with raw on load.
   // Showing sanitized by default avoids confusing unsanitized content on arrival.
   // Also, do NOT auto-save edits back to store here; only save on explicit action.
-
-  // Handle saving edited script
-  const handleSaveScript = () => {};
 
   // Always compute sanitized from the latest raw + any local edits
   const sanitizedScript = useMemo(
@@ -96,9 +114,6 @@ export default function VoiceoverPage() {
 
   // Debug logging (can be removed in production)
   React.useEffect(() => {
-    console.log('Voiceover page - rawScript:', rawScript?.substring(0, 100) + '...');
-    console.log('Voiceover page - editedScript:', editedScript?.substring(0, 100) + '...');
-    console.log('Voiceover page - sanitizedScript:', sanitizedScript?.substring(0, 100) + '...');
   }, [rawScript, editedScript, sanitizedScript]);
   const audioSrc: string | undefined = (audioUrl ?? undefined) || (audioDataUrl ?? undefined);
 
@@ -161,7 +176,7 @@ export default function VoiceoverPage() {
                 onClick={() => router.push('/')}
                 className="text-slate-600 hover:text-slate-900 text-sm font-medium flex items-center space-x-1 transition-colors"
               >
-                <span>🏠</span>
+                <span>Projects</span>
                 <span>Projects</span>
               </button>
             </div>
@@ -172,7 +187,7 @@ export default function VoiceoverPage() {
           {cameFromScript && (
             <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-6">
               <div className="flex items-center">
-                <span className="text-green-600 mr-2">✅</span>
+                <span className="text-green-600 mr-2">Done</span>
                 <p className="text-green-700 text-sm">
                   Script loaded successfully! Ready to generate your voiceover.
                 </p>
@@ -204,12 +219,12 @@ export default function VoiceoverPage() {
                   ) : (
                     <>You can edit this script directly. The sanitized version will be used for voiceover generation.</>
                   )}
-                  <a
+                  <Link
                     href="/script"
                     className="text-blue-600 hover:text-blue-700 ml-1"
                   >
                     Generate a new script →
-                  </a>
+                  </Link>
                 </p>
               </div>
 
@@ -266,7 +281,7 @@ export default function VoiceoverPage() {
           {hasGeneratedVoiceover && audioSrc && (
             <div className="bg-white rounded-lg border border-slate-200 p-6 shadow-sm">
               <h3 className="text-lg font-semibold text-slate-900 mb-4 flex items-center">
-                {audioReady ? <span className="mr-2">✅</span> : <div className="animate-spin h-4 w-4 border-2 border-slate-700 border-t-transparent rounded-full mr-2"></div>}
+                {audioReady ? <span className="mr-2">Done</span> : <div className="animate-spin h-4 w-4 border-2 border-slate-700 border-t-transparent rounded-full mr-2"></div>}
                 {audioReady ? 'Voiceover Ready' : 'Loading audio...'}
               </h3>
 
@@ -307,7 +322,7 @@ export default function VoiceoverPage() {
                       }}
                       className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg font-medium transition-colors flex items-center space-x-2"
                     >
-                      <span>🎨</span>
+                      <span>Images</span>
                       <span>Continue to Images</span>
                     </button>
                   </div>

@@ -1,10 +1,4 @@
-"""
-AI service for script generation.
-
-Prefers Groq (LLaMA models, free tier) when a GROQ_API_KEY is
-configured, and falls back to Google Gemini (if configured) or a mock
-script for local development.
-"""
+"""AI service for script generation with configurable model providers."""
 
 import os
 import re
@@ -26,7 +20,14 @@ except ImportError:  # pragma: no cover - httpx should be installed via requirem
     httpx = None
 
 
-GROQ_PLACEHOLDER_KEYS = {'', 'your_api_key_here', 'YOUR_KEY_HERE'}
+PLACEHOLDER_KEYS = {
+    '',
+    'your_api_key_here',
+    'YOUR_KEY_HERE',
+    'your-openai-api-key',
+    'your-anthropic-api-key',
+    'your-gemini-key',
+}
 
 
 async def generate_script_with_gemini(
@@ -50,11 +51,13 @@ async def generate_script_with_gemini(
     square_feet: Optional[int] = None,
     mls_number: Optional[str] = None,
     property_features: Optional[list[str]] = None,
+    model_provider: Optional[str] = 'auto',
+    model_name: Optional[str] = None,
     # Photo-grounding
     photos: Optional[list[dict]] = None,
 ) -> str:
     """
-    Generate script content using Groq (preferred, free) or Google Gemini.
+    Generate script content using the requested provider/model.
     """
     prompt = build_prompt(
         topic=topic,
@@ -79,32 +82,74 @@ async def generate_script_with_gemini(
         photos=photos,
     )
     
-    # Try Groq first (free tier, no credit card required)
-    groq_key = os.getenv("GROQ_API_KEY")
-    if groq_key and groq_key not in GROQ_PLACEHOLDER_KEYS:
-        try:
-            text = await _generate_with_groq(
-                api_key=groq_key,
+    provider = (model_provider or 'auto').lower()
+    max_tokens = _estimate_max_tokens(word_count, mode, image_count)
+
+    async def run_provider(name: str) -> Optional[str]:
+        if name == 'groq':
+            api_key = os.getenv('GROQ_API_KEY')
+            if not api_key or api_key in PLACEHOLDER_KEYS:
+                return None
+            return await _generate_with_groq(
+                api_key=api_key,
                 prompt=prompt,
                 temperature=temperature,
-                max_tokens=_estimate_max_tokens(word_count, mode, image_count),
+                max_tokens=max_tokens,
+                model_name=model_name,
             )
-            return _strip_intro_to_first_scene(text)
+
+        if name == 'gemini':
+            return await _generate_with_gemini_sdk(
+                prompt=prompt,
+                temperature=temperature,
+                model_name=model_name,
+            )
+
+        if name == 'openai':
+            api_key = os.getenv('OPENAI_API_KEY')
+            if not api_key or api_key in PLACEHOLDER_KEYS:
+                return None
+            return await _generate_with_openai(
+                api_key=api_key,
+                prompt=prompt,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                model_name=model_name,
+            )
+
+        if name == 'anthropic':
+            api_key = os.getenv('ANTHROPIC_API_KEY')
+            if not api_key or api_key in PLACEHOLDER_KEYS:
+                return None
+            return await _generate_with_anthropic(
+                api_key=api_key,
+                prompt=prompt,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                model_name=model_name,
+            )
+
+        return None
+
+    try_order = ['groq', 'gemini', 'openai', 'anthropic'] if provider == 'auto' else [provider]
+
+    for provider_name in try_order:
+        try:
+            text = await run_provider(provider_name)
+            if text:
+                return _strip_intro_to_first_scene(text)
         except Exception as e:
-            print(f"Groq generation error: {str(e)} - falling back to Gemini/mock.")
-    
-    # Fallback to Gemini if configured
-    try:
-        text = await _generate_with_gemini_sdk(
-            prompt=prompt,
-            temperature=temperature
+            if provider != 'auto':
+                raise Exception(f'{provider_name} generation failed: {e}') from e
+            print(f'{provider_name} generation error: {e}')
+
+    if provider != 'auto':
+        raise Exception(
+            f'No API key configured for provider "{provider}" or request failed. '
+            'Set the corresponding environment variable and retry.'
         )
-        if text:
-            return _strip_intro_to_first_scene(text)
-    except Exception as e:
-        print(f"Gemini SDK fallback error: {str(e)}")
-    
-    # Last resort: mock data for local development
+
+    # Last resort for local development
     return generate_mock_script(topic, image_count, mode)
 
 
@@ -113,13 +158,14 @@ async def _generate_with_groq(
     prompt: str,
     temperature: float,
     max_tokens: int,
+    model_name: Optional[str] = None,
 ) -> str:
     """Call Groq's chat completion endpoint (free tier, no credit card required)."""
     if httpx is None:
         raise Exception("httpx is not installed; cannot call Groq API.")
     
     # Groq offers free LLaMA models - using LLaMA 3.1 8B which is fast and free
-    groq_model = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
+    groq_model = model_name or os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
     api_url = "https://api.groq.com/openai/v1/chat/completions"
     
     payload = {
@@ -170,10 +216,14 @@ async def _generate_with_groq(
         return content
 
 
-async def _generate_with_gemini_sdk(prompt: str, temperature: float) -> Optional[str]:
+async def _generate_with_gemini_sdk(
+    prompt: str,
+    temperature: float,
+    model_name: Optional[str] = None,
+) -> Optional[str]:
     """Use Google Gemini SDK if configured."""
     api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
-    if not api_key or api_key in GROQ_PLACEHOLDER_KEYS:
+    if not api_key or api_key in PLACEHOLDER_KEYS:
         return None
     
     try:
@@ -183,7 +233,7 @@ async def _generate_with_gemini_sdk(prompt: str, temperature: float) -> Optional
     
     genai.configure(api_key=api_key)
     model = genai.GenerativeModel(
-        model_name='gemini-2.0-flash-exp',
+        model_name=model_name or os.getenv('GEMINI_MODEL', 'gemini-1.5-flash'),
         system_instruction="You are a professional YouTube scriptwriter and video director. Your task is to create engaging, visual, and well-structured content.",
         generation_config={
             "temperature": float(max(0.0, min(1.0, temperature))),
@@ -193,6 +243,125 @@ async def _generate_with_gemini_sdk(prompt: str, temperature: float) -> Optional
     
     response = model.generate_content(prompt)
     return getattr(response, "text", None)
+
+
+async def _generate_with_openai(
+    api_key: str,
+    prompt: str,
+    temperature: float,
+    max_tokens: int,
+    model_name: Optional[str] = None,
+) -> str:
+    """Call OpenAI-compatible chat completions endpoint."""
+    if httpx is None:
+        raise Exception("httpx is not installed; cannot call OpenAI API.")
+
+    api_base = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
+    api_url = f"{api_base}/chat/completions"
+    model = model_name or os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+
+    payload = {
+        "model": model,
+        "temperature": float(max(0.0, min(1.0, temperature))),
+        "max_tokens": max_tokens,
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "You are a professional YouTube scriptwriter and video director. "
+                    "Your task is to create engaging, visual, and well-structured content."
+                ),
+            },
+            {"role": "user", "content": prompt},
+        ],
+    }
+
+    timeout = httpx.Timeout(60.0, connect=10.0)
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        response = await client.post(
+            api_url,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            json=payload,
+        )
+
+        if response.status_code >= 400:
+            try:
+                detail = response.json()
+            except Exception:
+                detail = response.text
+            raise Exception(f"OpenAI API error {response.status_code}: {detail}")
+
+        data = response.json()
+        choices = data.get("choices", [])
+        if not choices:
+            raise Exception("OpenAI API returned no choices")
+
+        message = choices[0].get("message") or {}
+        content = message.get("content")
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            texts = [part.get("text", "") for part in content if isinstance(part, dict)]
+            merged = "\n".join([t for t in texts if t]).strip()
+            if merged:
+                return merged
+        raise Exception("OpenAI API returned empty content")
+
+
+async def _generate_with_anthropic(
+    api_key: str,
+    prompt: str,
+    temperature: float,
+    max_tokens: int,
+    model_name: Optional[str] = None,
+) -> str:
+    """Call Anthropic messages endpoint."""
+    if httpx is None:
+        raise Exception("httpx is not installed; cannot call Anthropic API.")
+
+    api_url = "https://api.anthropic.com/v1/messages"
+    model = model_name or os.getenv("ANTHROPIC_MODEL", "claude-3-5-haiku-latest")
+
+    payload = {
+        "model": model,
+        "temperature": float(max(0.0, min(1.0, temperature))),
+        "max_tokens": max_tokens,
+        "system": (
+            "You are a professional YouTube scriptwriter and video director. "
+            "Your task is to create engaging, visual, and well-structured content."
+        ),
+        "messages": [{"role": "user", "content": prompt}],
+    }
+
+    timeout = httpx.Timeout(60.0, connect=10.0)
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        response = await client.post(
+            api_url,
+            headers={
+                "x-api-key": api_key,
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json",
+            },
+            json=payload,
+        )
+
+        if response.status_code >= 400:
+            try:
+                detail = response.json()
+            except Exception:
+                detail = response.text
+            raise Exception(f"Anthropic API error {response.status_code}: {detail}")
+
+        data = response.json()
+        content = data.get("content") or []
+        texts = [part.get("text", "") for part in content if isinstance(part, dict)]
+        merged = "\n".join([t for t in texts if t]).strip()
+        if not merged:
+            raise Exception("Anthropic API returned empty content")
+        return merged
 
 
 def build_prompt(
@@ -737,4 +906,3 @@ def _estimate_max_tokens(word_count: int, mode: str, image_count: int = 10) -> i
     total = base_tokens + scene_tokens
     # Groq LLaMA models support up to 8192 tokens, but be conservative
     return min(6144, total)
-

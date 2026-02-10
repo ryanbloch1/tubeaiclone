@@ -34,7 +34,7 @@ export const WordCountModal: React.FC<WordCountModalProps> = ({ open, wordCount,
           <button type="button" onClick={onClose} className={styles.button}>
             Cancel
           </button>
-          <button type="submit" className={styles.saveButton}>
+          <button type="button" onClick={() => onSave(value)} className={styles.saveButton}>
             Save
           </button>
         </div>
